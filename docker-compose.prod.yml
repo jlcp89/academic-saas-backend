@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: academic-saas-nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - static_files_prod:/var/www/static
+      - media_files_prod:/var/www/media
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  # Django Web Application (Multiple instances for load balancing)
+  web:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=prod
+      - DEBUG=False
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_STORAGE_BUCKET_NAME=${AWS_STORAGE_BUCKET_NAME}
+      - AWS_S3_REGION_NAME=us-east-1
+    volumes:
+      - static_files_prod:/app/staticfiles
+      - media_files_prod:/app/media
+    restart: unless-stopped
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Celery Worker for background tasks (Multiple instances)
+  celery:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=prod
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_STORAGE_BUCKET_NAME=${AWS_STORAGE_BUCKET_NAME}
+    command: celery -A core worker --loglevel=warning --concurrency=4
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Celery Beat for scheduled tasks
+  celery-beat:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=prod
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+    command: celery -A core beat --loglevel=warning
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # Flower for Celery monitoring
+  flower:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=${REDIS_URL}
+    command: celery -A core flower --port=5555
+    ports:
+      - "5555:5555"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  static_files_prod:
+  media_files_prod:

@@ -1,0 +1,141 @@
+name: Deploy Django Backend to AWS
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+    branches:
+      - dev
+      - main
+
+jobs:
+  # Deploy to dev environment
+  deploy_dev:
+    name: Deploy DEV Environment
+    if: github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Deploy Django Backend to EC2 (dev)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST_DEV }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            export ENVIRONMENT=dev
+            export DATABASE_URL=${{ secrets.DATABASE_URL_DEV }}
+            export REDIS_URL=${{ secrets.REDIS_URL_DEV }}
+            export SECRET_KEY=${{ secrets.SECRET_KEY_DEV }}
+            export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            export AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME_DEV }}
+            
+            cd /home/ec2-user
+            echo "Removing previous deployment..."
+            sudo rm -rf academic-saas-backend
+            
+            echo "Cloning backend repository (PR branch: ${{ github.event.pull_request.head.ref }})..."
+            git clone --depth 1 --branch ${{ github.event.pull_request.head.ref }} --single-branch https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository_owner }}/academic-saas-backend.git academic-saas-backend
+            
+            cd academic-saas-backend
+            
+            echo "Building Docker image..."
+            sudo docker build -t academic-saas-backend:dev .
+            
+            echo "Stopping existing containers..."
+            sudo docker-compose -f docker-compose.dev.yml down || true
+            
+            echo "Starting services..."
+            sudo docker-compose -f docker-compose.dev.yml up -d
+            
+            echo "Running migrations..."
+            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py migrate
+            
+            echo "Collecting static files..."
+            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py collectstatic --noinput
+            
+            echo "DEV backend deployment finished."
+
+  # Deploy to production environment
+  deploy_prod:
+    name: Deploy PROD Environment
+    if: |
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+      - name: Deploy Django Backend to EC2 (prod)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST_PROD }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            export ENVIRONMENT=prod
+            export DATABASE_URL=${{ secrets.DATABASE_URL_PROD }}
+            export REDIS_URL=${{ secrets.REDIS_URL_PROD }}
+            export SECRET_KEY=${{ secrets.SECRET_KEY_PROD }}
+            export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            export AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME_PROD }}
+            export ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS_PROD }}
+            
+            cd /home/ec2-user
+            echo "Creating backup of current deployment..."
+            sudo cp -r academic-saas-backend academic-saas-backend-backup-$(date +%Y%m%d-%H%M%S) || true
+            
+            echo "Removing previous deployment..."
+            sudo rm -rf academic-saas-backend
+            
+            echo "Cloning backend repository (main branch)..."
+            git clone --depth 1 --branch main --single-branch https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository_owner }}/academic-saas-backend.git academic-saas-backend
+            
+            cd academic-saas-backend
+            
+            echo "Building Docker image..."
+            sudo docker build -t academic-saas-backend:prod .
+            
+            echo "Stopping existing containers..."
+            sudo docker-compose -f docker-compose.prod.yml down
+            
+            echo "Starting services..."
+            sudo docker-compose -f docker-compose.prod.yml up -d
+            
+            echo "Running migrations..."
+            sudo docker-compose -f docker-compose.prod.yml exec -T web python manage.py migrate
+            
+            echo "Collecting static files..."
+            sudo docker-compose -f docker-compose.prod.yml exec -T web python manage.py collectstatic --noinput
+            
+            echo "Health check..."
+            sleep 30
+            curl -f http://localhost/admin/login/ || (echo "Health check failed" && exit 1)
+            
+            echo "PROD backend deployment finished."
+
+  # Cleanup old images
+  cleanup:
+    name: Cleanup Docker Images
+    needs: [deploy_dev, deploy_prod]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Cleanup old Docker images
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST_DEV }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "Cleaning up old Docker images..."
+            sudo docker image prune -f
+            sudo docker system prune -f
