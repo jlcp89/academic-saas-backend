@@ -38,3 +38,22 @@ local_settings.py
 htmlcov/
 .pytest_cache/
 .mypy_cache/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+*.tfplan
+*.tfstate
+.terraformrc
+terraform.rc
+terraform
+tfplan
+
+# Scripts con credenciales (solo para uso local)
+agregar-secretos-github.sh
+agregar-ssh-key.sh
+finalizar-configuracion.sh
+configurar-github-secretos.sh

@@ -281,7 +281,7 @@ data "aws_ami" "amazon_linux" {
 # Key Pair for EC2 instances
 resource "aws_key_pair" "main" {
   key_name   = "${var.project_name}-${var.environment}-key"
-  public_key = file("~/.ssh/id_rsa.pub") # You'll need to generate this key
+  public_key = file("/home/jl/.ssh/academic_saas_aws.pub")
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-key"

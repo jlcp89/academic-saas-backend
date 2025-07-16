@@ -11,7 +11,7 @@ resource "aws_elasticache_subnet_group" "main" {
 
 # ElastiCache Parameter Group for Redis Performance
 resource "aws_elasticache_parameter_group" "redis" {
-  family = "redis7.x"
+  family = "redis7"
   name   = "${var.project_name}-${var.environment}-redis-params"
 
   # Performance parameters for high concurrency

@@ -16,13 +16,15 @@ resource "aws_db_parameter_group" "main" {
 
   # Performance parameters for high concurrency
   parameter {
-    name  = "shared_preload_libraries"
-    value = "pg_stat_statements"
+    name         = "shared_preload_libraries"
+    value        = "pg_stat_statements"
+    apply_method = "pending-reboot"
   }
 
   parameter {
-    name  = "max_connections"
-    value = "500"
+    name         = "max_connections"
+    value        = "500"
+    apply_method = "pending-reboot"
   }
 
   parameter {
@@ -36,38 +38,45 @@ resource "aws_db_parameter_group" "main" {
   }
 
   parameter {
-    name  = "work_mem"
-    value = "4096"
+    name         = "work_mem"
+    value        = "4096"
+    apply_method = "immediate"
   }
 
   parameter {
-    name  = "maintenance_work_mem"
-    value = "65536"
+    name         = "maintenance_work_mem"
+    value        = "65536"
+    apply_method = "immediate"
   }
 
   parameter {
-    name  = "checkpoint_completion_target"
-    value = "0.9"
+    name         = "checkpoint_completion_target"
+    value        = "0.9"
+    apply_method = "immediate"
   }
 
   parameter {
-    name  = "wal_buffers"
-    value = "16384"
+    name         = "wal_buffers"
+    value        = "16384"
+    apply_method = "pending-reboot"
   }
 
   parameter {
-    name  = "default_statistics_target"
-    value = "100"
+    name         = "default_statistics_target"
+    value        = "100"
+    apply_method = "immediate"
   }
 
   parameter {
-    name  = "random_page_cost"
-    value = "1.1"
+    name         = "random_page_cost"
+    value        = "1.1"
+    apply_method = "immediate"
   }
 
   parameter {
-    name  = "effective_io_concurrency"
-    value = "200"
+    name         = "effective_io_concurrency"
+    value        = "200"
+    apply_method = "immediate"
   }
 
   tags = {

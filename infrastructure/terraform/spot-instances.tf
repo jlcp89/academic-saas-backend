@@ -11,10 +11,10 @@ resource "aws_spot_fleet_request" "dev_backend" {
   
   # Multiple instance types for better availability
   launch_specification {
-    image_id               = data.aws_ami.amazon_linux.id
+    ami                    = data.aws_ami.amazon_linux.id
     instance_type          = "t3.medium"
     key_name              = aws_key_pair.main.key_name
-    security_groups       = [aws_security_group.app.id]
+    vpc_security_group_ids = [aws_security_group.app.id]
     subnet_id             = aws_subnet.private[0].id
     availability_zone     = aws_subnet.private[0].availability_zone
     user_data             = base64encode(templatefile("${path.module}/user_data/backend.sh", {
@@ -33,10 +33,10 @@ resource "aws_spot_fleet_request" "dev_backend" {
   }
 
   launch_specification {
-    image_id               = data.aws_ami.amazon_linux.id
+    ami                    = data.aws_ami.amazon_linux.id
     instance_type          = "t3.small"
     key_name              = aws_key_pair.main.key_name
-    security_groups       = [aws_security_group.app.id]
+    vpc_security_group_ids = [aws_security_group.app.id]
     subnet_id             = aws_subnet.private[1].id
     availability_zone     = aws_subnet.private[1].availability_zone
     user_data             = base64encode(templatefile("${path.module}/user_data/backend.sh", {
@@ -162,7 +162,7 @@ resource "aws_autoscaling_group" "backend_mixed" {
     instances_distribution {
       on_demand_base_capacity                  = 1
       on_demand_percentage_above_base_capacity = 30
-      spot_allocation_strategy                = "price-capacity-optimized"
+      spot_allocation_strategy                = "lowest-price"
       spot_instance_pools                     = 3
       spot_max_price                          = "0.10"
     }
@@ -236,15 +236,8 @@ resource "aws_cloudwatch_metric_alarm" "spot_interruption" {
 }
 
 # Reserved Instance Recommendations (Cost Explorer)
-resource "aws_ce_rightsizing_recommendation" "main" {
-  count   = var.enable_ri_recommendations ? 1 : 0
-  service = "EC2-Instance"
-
-  configuration {
-    benefits_considered = true
-    recommendation_target = "SAME_INSTANCE_FAMILY"
-  }
-}
+# Note: aws_ce_rightsizing_recommendation is not available in current AWS provider
+# Use AWS Cost Explorer console for RI recommendations
 
 # Cost optimization Lambda for Spot Instance management
 resource "aws_lambda_function" "spot_optimizer" {
@@ -253,7 +246,7 @@ resource "aws_lambda_function" "spot_optimizer" {
   filename         = data.archive_file.spot_optimizer_zip[0].output_path
   function_name    = "${var.project_name}-${var.environment}-spot-optimizer"
   role            = aws_iam_role.spot_optimizer_lambda[0].arn
-  handler         = "index.handler"
+  handler         = "spot_optimizer.handler"
   runtime         = "python3.9"
   timeout         = 300
 
@@ -275,7 +268,7 @@ data "archive_file" "spot_optimizer_zip" {
   output_path = "/tmp/spot_optimizer.zip"
   source {
     content = file("${path.module}/lambda/spot_optimizer.py")
-    filename = "index.py"
+    filename = "spot_optimizer.py"
   }
 }
 

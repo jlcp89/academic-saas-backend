@@ -118,6 +118,37 @@ variable "s3_lifecycle_enabled" {
   default     = true
 }
 
+# NAT Gateway alternatives for cost optimization
+variable "use_nat_instance" {
+  description = "Use NAT instance instead of NAT Gateway (cost-effective for dev)"
+  type        = bool
+  default     = true
+}
+
+variable "use_public_subnets" {
+  description = "Deploy instances in public subnets (least secure, lowest cost)"
+  type        = bool
+  default     = false
+}
+
+variable "use_nat_instance_ha" {
+  description = "Use high-availability NAT instances for production (cost-effective alternative to NAT Gateway)"
+  type        = bool
+  default     = false
+}
+
+variable "nat_instance_type" {
+  description = "Instance type for NAT instances"
+  type        = string
+  default     = "t3.small"
+}
+
+variable "allowed_ssh_cidrs" {
+  description = "CIDR blocks allowed for SSH access (when using public subnets)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]  # Restrict this in production!
+}
+
 variable "s3_transition_to_ia_days" {
   description = "Days after which objects transition to IA storage class"
   type        = number

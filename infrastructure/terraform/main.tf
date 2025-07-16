@@ -83,9 +83,9 @@ resource "aws_subnet" "database" {
   }
 }
 
-# NAT Gateways for Private Subnets
+# NAT Gateways for Private Subnets (only if not using NAT instance)
 resource "aws_eip" "nat" {
-  count  = 3
+  count  = var.use_nat_instance ? 0 : 3
   domain = "vpc"
 
   tags = {
@@ -95,7 +95,7 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_nat_gateway" "main" {
-  count         = 3
+  count         = var.use_nat_instance ? 0 : 3
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
 
@@ -123,7 +123,7 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table" "private" {
-  count  = 3
+  count  = var.use_nat_instance ? 0 : 3
   vpc_id = aws_vpc.main.id
 
   route {
@@ -145,7 +145,7 @@ resource "aws_route_table_association" "public" {
 }
 
 resource "aws_route_table_association" "private" {
-  count          = 3
+  count          = var.use_nat_instance ? 0 : 3
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id
 }

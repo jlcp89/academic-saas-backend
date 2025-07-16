@@ -125,15 +125,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "main" {
       prefix = "logs/"
     }
 
-    # Move to IA immediately
+    # Move to IA after 30 days (minimum required)
     transition {
-      days          = 0
+      days          = 30
       storage_class = "STANDARD_IA"
     }
 
-    # Move to Glacier after 30 days
+    # Move to Glacier after 60 days
     transition {
-      days          = 30
+      days          = 60
       storage_class = "GLACIER"
     }
 
@@ -367,23 +367,5 @@ resource "aws_s3_bucket_request_payment_configuration" "main" {
   payer  = "BucketOwner"
 }
 
-# Output S3 information
-output "s3_bucket_name" {
-  description = "Name of the S3 bucket"
-  value       = aws_s3_bucket.main.bucket
-}
-
-output "s3_bucket_arn" {
-  description = "ARN of the S3 bucket"
-  value       = aws_s3_bucket.main.arn
-}
-
-output "cloudfront_distribution_id" {
-  description = "CloudFront Distribution ID"
-  value       = aws_cloudfront_distribution.main.id
-}
-
-output "cloudfront_domain_name" {
-  description = "CloudFront Distribution Domain Name"
-  value       = aws_cloudfront_distribution.main.domain_name
-}
+# Output S3 information - moved to outputs.tf to avoid duplication
+# All outputs are consolidated in outputs.tf
