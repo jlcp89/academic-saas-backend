@@ -48,57 +48,77 @@ jobs:
         ASG_NAME: academic-saas-dev-backend-asg
         IMAGE_URI: ${{ steps.build-image.outputs.image }}
       run: |
-        # Create deployment script
-        cat > deploy-backend.sh << 'EOF'
-        #!/bin/bash
-        
-        # Pull latest image
-        docker pull $1
-        
-        # Stop existing container if running
-        docker stop academic-saas-backend || true
-        docker rm academic-saas-backend || true
-        
-        # Run new container
-        docker run -d \
-          --name academic-saas-backend \
-          --restart unless-stopped \
-          -p 8000:8000 \
-          --env-file /opt/academic-saas/.env \
-          $1
-        
-        # Health check
-        sleep 30
-        curl -f http://localhost:8000/admin/login/ || exit 1
-        
-        echo "Backend deployment completed successfully"
-        EOF
-        
-        # Upload deployment script to S3
-        aws s3 cp deploy-backend.sh s3://academic-saas-dev-7244fcb3/deployment/deploy-backend.sh
-        
-        # Create SSM document for deployment
-        aws ssm put-parameter \
-          --name "/academic-saas/dev/backend/image" \
-          --value "$IMAGE_URI" \
-          --type "String" \
-          --overwrite
-        
-        # Execute deployment on all instances in ASG
+        # Get instance IPs from ASG
         INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
           --auto-scaling-group-names $ASG_NAME \
           --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
           --output text)
         
-        for INSTANCE_ID in $INSTANCE_IDS; do
-          aws ssm send-command \
-            --instance-ids $INSTANCE_ID \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["aws s3 cp s3://academic-saas-dev-7244fcb3/deployment/deploy-backend.sh /tmp/deploy-backend.sh && chmod +x /tmp/deploy-backend.sh && /tmp/deploy-backend.sh '$IMAGE_URI'"]' \
-            --comment "Deploy backend application"
-        done
+        if [ -z "$INSTANCE_IDS" ]; then
+          echo "No running instances found in ASG"
+          exit 1
+        fi
         
-        echo "Deployment commands sent to all instances"
+        # Get instance IPs
+        for INSTANCE_ID in $INSTANCE_IDS; do
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          
+          if [ "$INSTANCE_IP" != "null" ] && [ "$INSTANCE_IP" != "" ]; then
+            echo "Deploying to instance $INSTANCE_ID ($INSTANCE_IP)"
+            
+            # Setup SSH key
+            echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
+            chmod 600 /tmp/ec2-key.pem
+            
+            # Deploy via SSH
+            ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << EOF
+              # Login to ECR
+              aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+              
+              # Pull latest image
+              docker pull $IMAGE_URI
+              
+              # Create environment file
+              sudo mkdir -p /opt/academic-saas
+              sudo tee /opt/academic-saas/.env << 'ENVEOF'
+SECRET_KEY=${{ secrets.SECRET_KEY }}
+DATABASE_URL=${{ secrets.DATABASE_URL }}
+REDIS_URL=${{ secrets.REDIS_URL }}
+AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME }}
+ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
+DEBUG=False
+ENVEOF
+              
+              # Stop existing container if running
+              docker stop academic-saas-backend || true
+              docker rm academic-saas-backend || true
+              
+              # Run new container
+              docker run -d \
+                --name academic-saas-backend \
+                --restart unless-stopped \
+                -p 8000:8000 \
+                --env-file /opt/academic-saas/.env \
+                $IMAGE_URI
+              
+              # Health check
+              sleep 30
+              curl -f http://localhost:8000/admin/login/ || exit 1
+              
+              echo "Backend deployment completed successfully"
+EOF
+            
+            # Clean up key file
+            rm -f /tmp/ec2-key.pem
+          else
+            echo "Instance $INSTANCE_ID has no public IP, skipping"
+          fi
+        done
 
     - name: Verify deployment
       run: |
