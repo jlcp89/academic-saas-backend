@@ -121,7 +121,7 @@ jobs:
               
               # Clean up temp file
               rm -f /tmp/backend.env
-EOF
+            EOF
             
             # Clean up key file
             rm -f /tmp/ec2-key.pem
