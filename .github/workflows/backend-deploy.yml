@@ -1,0 +1,122 @@
+name: Deploy Backend to AWS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: academic-saas-backend
+  ECS_CLUSTER: academic-saas-dev
+
+jobs:
+  deploy:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build a docker container and push it to ECR
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Deploy to EC2 via Auto Scaling Group
+      env:
+        ASG_NAME: academic-saas-dev-backend-asg
+        IMAGE_URI: ${{ steps.build-image.outputs.image }}
+      run: |
+        # Create deployment script
+        cat > deploy-backend.sh << 'EOF'
+        #!/bin/bash
+        
+        # Pull latest image
+        docker pull $1
+        
+        # Stop existing container if running
+        docker stop academic-saas-backend || true
+        docker rm academic-saas-backend || true
+        
+        # Run new container
+        docker run -d \
+          --name academic-saas-backend \
+          --restart unless-stopped \
+          -p 8000:8000 \
+          --env-file /opt/academic-saas/.env \
+          $1
+        
+        # Health check
+        sleep 30
+        curl -f http://localhost:8000/admin/login/ || exit 1
+        
+        echo "Backend deployment completed successfully"
+        EOF
+        
+        # Upload deployment script to S3
+        aws s3 cp deploy-backend.sh s3://academic-saas-dev-7244fcb3/deployment/deploy-backend.sh
+        
+        # Create SSM document for deployment
+        aws ssm put-parameter \
+          --name "/academic-saas/dev/backend/image" \
+          --value "$IMAGE_URI" \
+          --type "String" \
+          --overwrite
+        
+        # Execute deployment on all instances in ASG
+        INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names $ASG_NAME \
+          --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+          --output text)
+        
+        for INSTANCE_ID in $INSTANCE_IDS; do
+          aws ssm send-command \
+            --instance-ids $INSTANCE_ID \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["aws s3 cp s3://academic-saas-dev-7244fcb3/deployment/deploy-backend.sh /tmp/deploy-backend.sh && chmod +x /tmp/deploy-backend.sh && /tmp/deploy-backend.sh '$IMAGE_URI'"]' \
+            --comment "Deploy backend application"
+        done
+        
+        echo "Deployment commands sent to all instances"
+
+    - name: Verify deployment
+      run: |
+        # Wait for deployment to complete
+        sleep 120
+        
+        # Check health endpoint
+        BACKEND_URL="http://academic-saas-dev-backend-alb-1977961495.us-east-1.elb.amazonaws.com"
+        curl -f $BACKEND_URL/admin/login/ || exit 1
+        
+        echo "Deployment verification completed"
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ ${{ job.status }} == 'success' ]; then
+          echo "✅ Backend deployment successful"
+        else
+          echo "❌ Backend deployment failed"
+          exit 1
+        fi
