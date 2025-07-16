@@ -88,40 +88,35 @@ jobs:
             # Deploy via SSH  
             ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
             scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/backend.env ubuntu@$INSTANCE_IP:/tmp/backend.env
-            ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << EOF
+            
+            # Create deployment script
+            cat > /tmp/deploy.sh << 'DEPLOY_SCRIPT'
+#!/bin/bash
+set -e
 # Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
-
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $1
 # Pull latest image
-docker pull $IMAGE_URI
-
+docker pull $2
 # Setup environment file
 sudo mkdir -p /opt/academic-saas
 sudo cp /tmp/backend.env /opt/academic-saas/.env
 sudo chown root:root /opt/academic-saas/.env
 sudo chmod 600 /opt/academic-saas/.env
-
 # Stop existing container if running
 docker stop academic-saas-backend || true
 docker rm academic-saas-backend || true
-
 # Run new container
-docker run -d \
-  --name academic-saas-backend \
-  --restart unless-stopped \
-  -p 8000:8000 \
-  --env-file /opt/academic-saas/.env \
-  $IMAGE_URI
-
+docker run -d --name academic-saas-backend --restart unless-stopped -p 8000:8000 --env-file /opt/academic-saas/.env $2
 # Health check
 sleep 30
 curl -f http://localhost:8000/admin/login/ || exit 1
-
 echo "Backend deployment completed successfully"
-
-# Clean up temp file
 rm -f /tmp/backend.env
-EOF
+DEPLOY_SCRIPT
+            
+            # Execute deployment
+            scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/deploy.sh ubuntu@$INSTANCE_IP:/tmp/deploy.sh
+            ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "chmod +x /tmp/deploy.sh && /tmp/deploy.sh $ECR_REGISTRY $IMAGE_URI"
             
             # Clean up key file
             rm -f /tmp/ec2-key.pem
