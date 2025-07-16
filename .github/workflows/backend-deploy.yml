@@ -108,7 +108,8 @@ jobs:
               echo "rm -f /tmp/backend.env"
             } > /tmp/deploy.sh
             
-            # Execute deployment
+            # Execute deployment via SSH (now that instances have public IPs)
+            scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/backend.env ubuntu@$INSTANCE_IP:/tmp/backend.env
             scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/deploy.sh ubuntu@$INSTANCE_IP:/tmp/deploy.sh
             ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "chmod +x /tmp/deploy.sh && /tmp/deploy.sh $ECR_REGISTRY $IMAGE_URI"
             
