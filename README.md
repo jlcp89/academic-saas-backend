@@ -10,6 +10,7 @@ A multi-tenant academic management SaaS application built with Django and Django
 - **Subscription Management**: Basic and Premium plans with expiration tracking
 - **JWT Authentication**: Secure token-based authentication
 - **RESTful API**: Complete API with documentation
+- **Automated Deployment**: GitHub Actions CI/CD pipeline for automated testing and deployment
 
 ## Project Structure
 
@@ -109,4 +110,5 @@ For production deployment:
 
 ## License
 
-This project is proprietary software.
+This project is proprietary software.# Test Deploy 2
+# Test Deploy 3 - Final
