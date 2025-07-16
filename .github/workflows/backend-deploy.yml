@@ -89,39 +89,39 @@ jobs:
             ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
             scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/backend.env ubuntu@$INSTANCE_IP:/tmp/backend.env
             ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << EOF
-              # Login to ECR
-              aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
-              
-              # Pull latest image
-              docker pull $IMAGE_URI
-              
-              # Setup environment file
-              sudo mkdir -p /opt/academic-saas
-              sudo cp /tmp/backend.env /opt/academic-saas/.env
-              sudo chown root:root /opt/academic-saas/.env
-              sudo chmod 600 /opt/academic-saas/.env
-              
-              # Stop existing container if running
-              docker stop academic-saas-backend || true
-              docker rm academic-saas-backend || true
-              
-              # Run new container
-              docker run -d \
-                --name academic-saas-backend \
-                --restart unless-stopped \
-                -p 8000:8000 \
-                --env-file /opt/academic-saas/.env \
-                $IMAGE_URI
-              
-              # Health check
-              sleep 30
-              curl -f http://localhost:8000/admin/login/ || exit 1
-              
-              echo "Backend deployment completed successfully"
-              
-              # Clean up temp file
-              rm -f /tmp/backend.env
-            EOF
+# Login to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+# Pull latest image
+docker pull $IMAGE_URI
+
+# Setup environment file
+sudo mkdir -p /opt/academic-saas
+sudo cp /tmp/backend.env /opt/academic-saas/.env
+sudo chown root:root /opt/academic-saas/.env
+sudo chmod 600 /opt/academic-saas/.env
+
+# Stop existing container if running
+docker stop academic-saas-backend || true
+docker rm academic-saas-backend || true
+
+# Run new container
+docker run -d \
+  --name academic-saas-backend \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  --env-file /opt/academic-saas/.env \
+  $IMAGE_URI
+
+# Health check
+sleep 30
+curl -f http://localhost:8000/admin/login/ || exit 1
+
+echo "Backend deployment completed successfully"
+
+# Clean up temp file
+rm -f /tmp/backend.env
+EOF
             
             # Clean up key file
             rm -f /tmp/ec2-key.pem
