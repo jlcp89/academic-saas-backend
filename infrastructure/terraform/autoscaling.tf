@@ -11,14 +11,7 @@ resource "aws_launch_template" "backend" {
     name = aws_iam_instance_profile.ec2.name
   }
 
-  user_data = base64encode(templatefile("${path.module}/user_data/backend.sh", {
-    environment        = var.environment
-    project_name      = var.project_name
-    db_secret_arn     = aws_secretsmanager_secret.db_password.arn
-    redis_secret_arn  = aws_secretsmanager_secret.redis_auth_token.arn
-    s3_bucket_name    = aws_s3_bucket.main.bucket
-    aws_region        = var.aws_region
-  }))
+  user_data = base64encode(file("${path.module}/user-data-backend-amazonlinux.sh"))
 
   tag_specifications {
     resource_type = "instance"

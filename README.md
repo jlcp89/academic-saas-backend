@@ -110,8 +110,10 @@ For production deployment:
 
 ## Deployment Status
 - Infrastructure: ✅ Deployed
-- Backend: 🔄 Deploying
+- Backend: 🔄 Deploying with PostgreSQL Docker
 - Frontend: 🔄 Pending
+- Database: ✅ PostgreSQL in Docker
+- Cache: ✅ Redis in Docker
 
 ## License
 
