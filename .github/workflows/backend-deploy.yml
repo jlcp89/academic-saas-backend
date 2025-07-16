@@ -73,17 +73,8 @@ jobs:
             echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
             chmod 600 /tmp/ec2-key.pem
             
-            # Deploy via SSH
-            ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << EOF
-              # Login to ECR
-              aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
-              
-              # Pull latest image
-              docker pull $IMAGE_URI
-              
-              # Create environment file
-              sudo mkdir -p /opt/academic-saas
-              sudo tee /opt/academic-saas/.env << 'ENVEOF'
+            # Create environment file locally
+            cat > /tmp/backend.env << EOF
 SECRET_KEY=${{ secrets.SECRET_KEY }}
 DATABASE_URL=${{ secrets.DATABASE_URL }}
 REDIS_URL=${{ secrets.REDIS_URL }}
@@ -92,7 +83,23 @@ AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
 AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME }}
 ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
 DEBUG=False
-ENVEOF
+EOF
+            
+            # Deploy via SSH  
+            ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+            scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/backend.env ubuntu@$INSTANCE_IP:/tmp/backend.env
+            ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP << EOF
+              # Login to ECR
+              aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
+              
+              # Pull latest image
+              docker pull $IMAGE_URI
+              
+              # Setup environment file
+              sudo mkdir -p /opt/academic-saas
+              sudo cp /tmp/backend.env /opt/academic-saas/.env
+              sudo chown root:root /opt/academic-saas/.env
+              sudo chmod 600 /opt/academic-saas/.env
               
               # Stop existing container if running
               docker stop academic-saas-backend || true
@@ -111,6 +118,9 @@ ENVEOF
               curl -f http://localhost:8000/admin/login/ || exit 1
               
               echo "Backend deployment completed successfully"
+              
+              # Clean up temp file
+              rm -f /tmp/backend.env
 EOF
             
             # Clean up key file
