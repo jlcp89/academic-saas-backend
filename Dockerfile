@@ -26,14 +26,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
+# Make entrypoint executable
+RUN chmod +x entrypoint.sh
+
 # Change ownership to app user
 RUN chown -R app:app /app
 
 # Switch to app user
 USER app
 
-# Collect static files
-RUN python manage.py collectstatic --noinput
+# Create staticfiles directory
+RUN mkdir -p staticfiles
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -41,6 +44,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Expose port
 EXPOSE 8000
+
+# Set entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
 
 # Production command with gunicorn for high concurrency
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--worker-class", "gevent", "--worker-connections", "1000", "--max-requests", "1000", "--max-requests-jitter", "100", "--preload", "core.wsgi:application"]
