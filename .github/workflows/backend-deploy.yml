@@ -90,29 +90,23 @@ jobs:
             scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/backend.env ubuntu@$INSTANCE_IP:/tmp/backend.env
             
             # Create deployment script
-            cat > /tmp/deploy.sh << 'DEPLOY_SCRIPT'
-#!/bin/bash
-set -e
-# Login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $1
-# Pull latest image
-docker pull $2
-# Setup environment file
-sudo mkdir -p /opt/academic-saas
-sudo cp /tmp/backend.env /opt/academic-saas/.env
-sudo chown root:root /opt/academic-saas/.env
-sudo chmod 600 /opt/academic-saas/.env
-# Stop existing container if running
-docker stop academic-saas-backend || true
-docker rm academic-saas-backend || true
-# Run new container
-docker run -d --name academic-saas-backend --restart unless-stopped -p 8000:8000 --env-file /opt/academic-saas/.env $2
-# Health check
-sleep 30
-curl -f http://localhost:8000/admin/login/ || exit 1
-echo "Backend deployment completed successfully"
-rm -f /tmp/backend.env
-DEPLOY_SCRIPT
+            {
+              echo "#!/bin/bash"
+              echo "set -e"
+              echo "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin \$1"
+              echo "docker pull \$2"
+              echo "sudo mkdir -p /opt/academic-saas"
+              echo "sudo cp /tmp/backend.env /opt/academic-saas/.env"
+              echo "sudo chown root:root /opt/academic-saas/.env"
+              echo "sudo chmod 600 /opt/academic-saas/.env"
+              echo "docker stop academic-saas-backend || true"
+              echo "docker rm academic-saas-backend || true"
+              echo "docker run -d --name academic-saas-backend --restart unless-stopped -p 8000:8000 --env-file /opt/academic-saas/.env \$2"
+              echo "sleep 30"
+              echo "curl -f http://localhost:8000/admin/login/ || exit 1"
+              echo "echo 'Backend deployment completed successfully'"
+              echo "rm -f /tmp/backend.env"
+            } > /tmp/deploy.sh
             
             # Execute deployment
             scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/deploy.sh ubuntu@$INSTANCE_IP:/tmp/deploy.sh
