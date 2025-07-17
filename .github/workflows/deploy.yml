@@ -129,7 +129,7 @@ jobs:
     - name: Deploy to Development Instance
       env:
         IMAGE_URI: ${{ needs.test-and-build.outputs.image-uri }}
-        ECR_REGISTRY: ${{ secrets.AWS_ACCESS_KEY_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+        ECR_REGISTRY: 860639121390.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
       run: |
         DEV_INSTANCE_IP="${{ secrets.DEV_INSTANCE_IP }}"
         
@@ -282,7 +282,7 @@ EOF
         IMAGE_URI: ${{ needs.test-and-build.outputs.image-uri }}
       run: |
         ASG_NAME="academic-saas-prod-backend-asg"
-        ECR_REGISTRY="${{ secrets.AWS_ACCESS_KEY_ID_PROD }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+        ECR_REGISTRY="860639121390.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
         
         echo "🚀 Deploying to production ASG: $ASG_NAME"
         
