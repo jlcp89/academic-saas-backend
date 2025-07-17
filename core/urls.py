@@ -26,6 +26,8 @@ urlpatterns = [
     # API routes
     path('api/', include('apps.users.urls')),
     path('api/', include('apps.academic.urls')),
+    path('api/', include('apps.dashboard.urls')),
+    path('api/', include('apps.reports.urls')),
     path('api/superadmin/', include('apps.organizations.urls')),
     
     # API documentation
