@@ -35,9 +35,9 @@ USER app
 # Collect static files
 RUN python manage.py collectstatic --noinput
 
-# Health check
+# Health check using curl instead of requests
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/admin/login/', timeout=10)"
+    CMD curl -f http://localhost:8000/admin/login/ || exit 1
 
 # Expose port
 EXPOSE 8000

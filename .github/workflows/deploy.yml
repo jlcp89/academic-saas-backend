@@ -1,0 +1,497 @@
+name: Deploy Backend to AWS
+
+on:
+  push:
+    branches: [ main, dev, feature/good-cicd ]
+  pull_request:
+    branches: [ main, dev ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: academic-saas-backend
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ========================================
+  # TESTING & BUILD JOB
+  # ========================================
+  test-and-build:
+    name: Test and Build
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_academic_saas
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    outputs:
+      image-uri: ${{ steps.build-image.outputs.image }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run database migrations
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_academic_saas
+        SECRET_KEY: test-secret-key-for-ci
+        DEBUG: True
+        ALLOWED_HOSTS: localhost,127.0.0.1
+        CORS_ALLOWED_ORIGINS: http://localhost:3000
+        AWS_STORAGE_BUCKET_NAME: test-bucket
+      run: |
+        python manage.py migrate
+
+    - name: Run tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_academic_saas
+        SECRET_KEY: test-secret-key-for-ci
+        DEBUG: True
+        ALLOWED_HOSTS: localhost,127.0.0.1
+        CORS_ALLOWED_ORIGINS: http://localhost:3000
+        AWS_STORAGE_BUCKET_NAME: test-bucket
+      run: |
+        python manage.py test
+
+    - name: Check code style with flake8
+      run: |
+        pip install flake8
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build Docker image
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        
+        # Push to ECR
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        # Output for next jobs
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # ========================================
+  # DEVELOPMENT DEPLOYMENT JOB
+  # ========================================
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/feature/good-cicd'
+    environment: development
+
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Deploy to Development Instance
+      env:
+        IMAGE_URI: ${{ needs.test-and-build.outputs.image-uri }}
+        ECR_REGISTRY: ${{ secrets.AWS_ACCESS_KEY_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+      run: |
+        DEV_INSTANCE_IP="${{ secrets.DEV_INSTANCE_IP }}"
+        
+        if [ -z "$DEV_INSTANCE_IP" ]; then
+          echo "❌ DEV_INSTANCE_IP secret not configured"
+          exit 1
+        fi
+        
+        echo "🚀 Deploying to development instance: $DEV_INSTANCE_IP"
+        
+        # Setup SSH key
+        echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
+        chmod 600 /tmp/ec2-key.pem
+        
+        # Create optimized deployment script
+        cat > /tmp/deploy-backend-dev.sh << 'EOF'
+#!/bin/bash
+set -e
+echo "🔄 Starting backend deployment..."
+
+# Login to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $1
+
+# Stop and remove existing container
+echo "⏹️  Stopping existing backend container..."
+docker stop academic-saas-backend || true
+docker rm academic-saas-backend || true
+
+# Pull new image
+echo "📥 Pulling new image: $2"
+docker pull $2
+
+# Create environment file
+sudo mkdir -p /opt/academic-saas
+sudo tee /opt/academic-saas/.env.backend > /dev/null << ENVEOF
+SECRET_KEY=$3
+DEBUG=True
+DATABASE_URL=$4
+REDIS_URL=$5
+ALLOWED_HOSTS=$6
+CORS_ALLOWED_ORIGINS=$7
+AWS_ACCESS_KEY_ID=$8
+AWS_SECRET_ACCESS_KEY=$9
+AWS_S3_REGION_NAME=${10}
+AWS_STORAGE_BUCKET_NAME=${11}
+ENVEOF
+
+sudo chown root:root /opt/academic-saas/.env.backend
+sudo chmod 600 /opt/academic-saas/.env.backend
+
+# Start new container
+echo "🚀 Starting new backend container..."
+docker run -d \
+  --name academic-saas-backend \
+  --restart unless-stopped \
+  --network host \
+  --env-file /opt/academic-saas/.env.backend \
+  $2
+
+# Wait for container to be healthy
+echo "⏳ Waiting for container to be healthy..."
+sleep 30
+
+# Check if container is running
+if docker ps | grep -q academic-saas-backend; then
+  echo "✅ Backend container is running"
+  
+  # Run migrations
+  echo "🔄 Running database migrations..."
+  docker exec academic-saas-backend python manage.py migrate
+  
+  # Collect static files
+  echo "📦 Collecting static files..."
+  docker exec academic-saas-backend python manage.py collectstatic --noinput
+  
+  # Health check
+  echo "🔍 Performing health check..."
+  if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+    echo "✅ Backend deployment completed successfully!"
+  else
+    echo "❌ Health check failed"
+    docker logs academic-saas-backend --tail 20
+    exit 1
+  fi
+else
+  echo "❌ Backend container failed to start"
+  docker logs academic-saas-backend --tail 20
+  exit 1
+fi
+EOF
+        
+        # Copy and execute deployment script
+        scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/deploy-backend-dev.sh ec2-user@$DEV_INSTANCE_IP:/tmp/deploy-backend-dev.sh
+        
+        ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$DEV_INSTANCE_IP \
+          "chmod +x /tmp/deploy-backend-dev.sh && /tmp/deploy-backend-dev.sh \
+          $ECR_REGISTRY \
+          $IMAGE_URI \
+          '${{ secrets.DJANGO_SECRET_KEY }}' \
+          '${{ secrets.DATABASE_URL }}' \
+          '${{ secrets.REDIS_URL }}' \
+          '${{ secrets.ALLOWED_HOSTS }}' \
+          '${{ secrets.CORS_ALLOWED_ORIGINS }}' \
+          '${{ secrets.AWS_ACCESS_KEY_ID }}' \
+          '${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
+          '${{ env.AWS_REGION }}' \
+          '${{ secrets.AWS_STORAGE_BUCKET_NAME }}'"
+        
+        # Clean up
+        rm -f /tmp/ec2-key.pem
+
+    - name: Verify deployment
+      run: |
+        DEV_INSTANCE_IP="${{ secrets.DEV_INSTANCE_IP }}"
+        BACKEND_URL="http://$DEV_INSTANCE_IP:8000"
+        
+        echo "🔍 Testing backend at $BACKEND_URL"
+        
+        # Wait for deployment to stabilize
+        sleep 30
+        
+        # Test health endpoint
+        if curl -f $BACKEND_URL/admin/login/ > /dev/null 2>&1; then
+          echo "✅ Development deployment verification completed"
+        else
+          echo "❌ Development deployment verification failed"
+          exit 1
+        fi
+
+  # ========================================
+  # PRODUCTION DEPLOYMENT JOB
+  # ========================================
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Deploy to Production Auto Scaling Group
+      env:
+        IMAGE_URI: ${{ needs.test-and-build.outputs.image-uri }}
+      run: |
+        ASG_NAME="academic-saas-prod-backend-asg"
+        ECR_REGISTRY="${{ secrets.AWS_ACCESS_KEY_ID_PROD }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+        
+        echo "🚀 Deploying to production ASG: $ASG_NAME"
+        
+        # Get instance IPs from ASG
+        INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names $ASG_NAME \
+          --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+          --output text)
+        
+        if [ -z "$INSTANCE_IDS" ]; then
+          echo "❌ No running instances found in ASG"
+          exit 1
+        fi
+        
+        echo "📋 Found instances: $INSTANCE_IDS"
+        
+        # Create production deployment script
+        cat > /tmp/deploy-backend-prod.sh << 'EOF'
+#!/bin/bash
+set -e
+echo "🔄 Starting production backend deployment..."
+
+# Login to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $1
+
+# Rolling deployment - stop old container gracefully
+echo "⏹️  Gracefully stopping existing backend container..."
+docker stop academic-saas-backend || true
+sleep 5
+docker rm academic-saas-backend || true
+
+# Pull new image
+echo "📥 Pulling new image: $2"
+docker pull $2
+
+# Create environment file
+sudo mkdir -p /opt/academic-saas
+sudo tee /opt/academic-saas/.env.backend > /dev/null << ENVEOF
+SECRET_KEY=$3
+DEBUG=False
+DATABASE_URL=$4
+REDIS_URL=$5
+ALLOWED_HOSTS=$6
+CORS_ALLOWED_ORIGINS=$7
+AWS_ACCESS_KEY_ID=$8
+AWS_SECRET_ACCESS_KEY=$9
+AWS_S3_REGION_NAME=${10}
+AWS_STORAGE_BUCKET_NAME=${11}
+ENVEOF
+
+sudo chown root:root /opt/academic-saas/.env.backend
+sudo chmod 600 /opt/academic-saas/.env.backend
+
+# Start new container with production settings
+echo "🚀 Starting new backend container..."
+docker run -d \
+  --name academic-saas-backend \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  --env-file /opt/academic-saas/.env.backend \
+  $2
+
+# Wait for container to be healthy
+echo "⏳ Waiting for container to be healthy..."
+sleep 60
+
+# Check if container is running
+if docker ps | grep -q academic-saas-backend; then
+  echo "✅ Backend container is running"
+  
+  # Health check
+  echo "🔍 Performing health check..."
+  if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+    echo "✅ Backend deployment completed successfully!"
+  else
+    echo "❌ Health check failed"
+    docker logs academic-saas-backend --tail 20
+    exit 1
+  fi
+else
+  echo "❌ Backend container failed to start"
+  docker logs academic-saas-backend --tail 20
+  exit 1
+fi
+EOF
+        
+        # Deploy to each instance
+        for INSTANCE_ID in $INSTANCE_IDS; do
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          
+          if [ "$INSTANCE_IP" != "null" ] && [ "$INSTANCE_IP" != "" ]; then
+            echo "🚀 Deploying to instance $INSTANCE_ID ($INSTANCE_IP)"
+            
+            # Setup SSH key
+            echo "${{ secrets.EC2_SSH_KEY_PROD }}" > /tmp/ec2-key.pem
+            chmod 600 /tmp/ec2-key.pem
+            
+            # Copy and execute deployment script
+            scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/deploy-backend-prod.sh ubuntu@$INSTANCE_IP:/tmp/deploy-backend-prod.sh
+            
+            ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP \
+              "chmod +x /tmp/deploy-backend-prod.sh && /tmp/deploy-backend-prod.sh \
+              $ECR_REGISTRY \
+              $IMAGE_URI \
+              '${{ secrets.DJANGO_SECRET_KEY_PROD }}' \
+              '${{ secrets.DATABASE_URL_PROD }}' \
+              '${{ secrets.REDIS_URL_PROD }}' \
+              '${{ secrets.ALLOWED_HOSTS_PROD }}' \
+              '${{ secrets.CORS_ALLOWED_ORIGINS_PROD }}' \
+              '${{ secrets.AWS_ACCESS_KEY_ID_PROD }}' \
+              '${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}' \
+              '${{ env.AWS_REGION }}' \
+              '${{ secrets.AWS_STORAGE_BUCKET_NAME_PROD }}'"
+            
+            # Clean up
+            rm -f /tmp/ec2-key.pem
+          else
+            echo "⚠️  Instance $INSTANCE_ID has no public IP, skipping"
+          fi
+        done
+
+    - name: Run database migrations (Production)
+      env:
+        IMAGE_URI: ${{ needs.test-and-build.outputs.image-uri }}
+      run: |
+        # Run migrations on first healthy instance only
+        ASG_NAME="academic-saas-prod-backend-asg"
+        
+        FIRST_INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names $ASG_NAME \
+          --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+          --output text | head -n1)
+        
+        if [ -n "$FIRST_INSTANCE_ID" ]; then
+          INSTANCE_IP=$(aws ec2 describe-instances \
+            --instance-ids $FIRST_INSTANCE_ID \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)
+          
+          echo "🔄 Running migrations on $INSTANCE_IP"
+          
+          # Setup SSH key
+          echo "${{ secrets.EC2_SSH_KEY_PROD }}" > /tmp/ec2-key.pem
+          chmod 600 /tmp/ec2-key.pem
+          
+          # Run migrations
+          ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP \
+            "docker exec academic-saas-backend python manage.py migrate"
+          
+          # Collect static files
+          ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP \
+            "docker exec academic-saas-backend python manage.py collectstatic --noinput"
+          
+          # Clean up
+          rm -f /tmp/ec2-key.pem
+        fi
+
+    - name: Verify production deployment
+      run: |
+        # Test via load balancer
+        BACKEND_URL="http://academic-saas-prod-backend-alb-*.us-east-1.elb.amazonaws.com"
+        
+        echo "🔍 Testing production backend via load balancer"
+        
+        # Wait for load balancer to detect healthy targets
+        sleep 120
+        
+        # Note: Replace with actual ALB DNS when available
+        echo "✅ Production deployment completed (manual verification required for ALB endpoint)"
+
+  # ========================================
+  # NOTIFICATION JOB
+  # ========================================
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [test-and-build, deploy-dev, deploy-prod]
+    if: always()
+    
+    steps:
+    - name: Notify deployment results
+      run: |
+        echo "📊 Deployment Summary:"
+        echo "Build Status: ${{ needs.test-and-build.result }}"
+        echo "Dev Deployment: ${{ needs.deploy-dev.result }}"
+        echo "Prod Deployment: ${{ needs.deploy-prod.result }}"
+        
+        if [ "${{ needs.test-and-build.result }}" == "success" ]; then
+          echo "✅ Build and tests passed"
+        else
+          echo "❌ Build or tests failed"
+        fi
+        
+        if [ "${{ needs.deploy-dev.result }}" == "success" ]; then
+          echo "✅ Development deployment successful"
+          echo "🌐 Dev Access: http://${{ secrets.DEV_INSTANCE_IP }}:8000"
+        elif [ "${{ needs.deploy-dev.result }}" == "skipped" ]; then
+          echo "⏭️ Development deployment skipped"
+        else
+          echo "❌ Development deployment failed"
+        fi
+        
+        if [ "${{ needs.deploy-prod.result }}" == "success" ]; then
+          echo "✅ Production deployment successful"
+        elif [ "${{ needs.deploy-prod.result }}" == "skipped" ]; then
+          echo "⏭️ Production deployment skipped"
+        else
+          echo "❌ Production deployment failed"
+        fi
