@@ -11,6 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user for security
@@ -38,9 +39,9 @@ USER app
 # Create staticfiles directory
 RUN mkdir -p staticfiles
 
-# Health check
+# Health check using curl instead of requests
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/admin/login/', timeout=10)"
+    CMD curl -f http://localhost:8000/admin/login/ || exit 1
 
 # Expose port
 EXPOSE 8000

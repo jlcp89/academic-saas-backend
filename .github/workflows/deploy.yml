@@ -1,0 +1,300 @@
+name: Deploy Backend to AWS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: academic-saas-backend
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_academic_saas
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run database migrations
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_academic_saas
+        SECRET_KEY: test-secret-key-for-ci
+        DEBUG: True
+        ALLOWED_HOSTS: localhost,127.0.0.1
+        CORS_ALLOWED_ORIGINS: http://localhost:3000
+      run: |
+        python manage.py migrate
+
+    - name: Run tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_academic_saas
+        SECRET_KEY: test-secret-key-for-ci
+        DEBUG: True
+        ALLOWED_HOSTS: localhost,127.0.0.1
+        CORS_ALLOWED_ORIGINS: http://localhost:3000
+      run: |
+        python manage.py test
+
+    - name: Check code style with flake8
+      run: |
+        pip install flake8
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  deploy:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    environment: development
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build a docker container and push it to ECR
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Deploy to Development Environment
+      env:
+        IMAGE_URI: ${{ steps.build-image.outputs.image }}
+      run: |
+        # Check if we're in minimal dev mode (single instance)
+        DEV_INSTANCE_IP="${{ secrets.DEV_INSTANCE_IP }}"
+        
+        if [ -n "$DEV_INSTANCE_IP" ]; then
+          echo "Deploying to single development instance: $DEV_INSTANCE_IP"
+          
+          # Setup SSH key
+          echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
+          chmod 600 /tmp/ec2-key.pem
+          
+          # Create environment file
+          {
+            echo "SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}"
+            echo "DEBUG=False"
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}"
+            echo "REDIS_URL=${{ secrets.REDIS_URL }}"
+            echo "ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}"
+            echo "CORS_ALLOWED_ORIGINS=${{ secrets.CORS_ALLOWED_ORIGINS }}"
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}"
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+            echo "AWS_S3_REGION_NAME=${{ env.AWS_REGION }}"
+            echo "AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME }}"
+          } > /tmp/backend.env
+          
+          # Deploy via SSH
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/backend.env ec2-user@$DEV_INSTANCE_IP:/tmp/backend.env
+          
+          # Create deployment script
+          {
+            echo "#!/bin/bash"
+            echo "set -e"
+            echo "echo 'Starting backend deployment...'"
+            echo "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin \$1"
+            echo "docker pull \$2"
+            echo "sudo mkdir -p /opt/academic-saas"
+            echo "sudo cp /tmp/backend.env /opt/academic-saas/.env.backend"
+            echo "sudo chown root:root /opt/academic-saas/.env.backend"
+            echo "sudo chmod 600 /opt/academic-saas/.env.backend"
+            echo "docker stop academic-saas-backend || true"
+            echo "docker rm academic-saas-backend || true"
+            echo "docker run -d --name academic-saas-backend --restart unless-stopped -p 8000:8000 --env-file /opt/academic-saas/.env.backend \$2"
+            echo "sleep 30"
+            echo "curl -f http://localhost:8000/admin/login/ || exit 1"
+            echo "echo 'Backend deployment completed successfully'"
+            echo "rm -f /tmp/backend.env"
+          } > /tmp/deploy-backend.sh
+          
+          # Execute deployment
+          scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/deploy-backend.sh ec2-user@$DEV_INSTANCE_IP:/tmp/deploy-backend.sh
+          ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$DEV_INSTANCE_IP "chmod +x /tmp/deploy-backend.sh && /tmp/deploy-backend.sh $ECR_REGISTRY $IMAGE_URI"
+          
+          # Clean up
+          rm -f /tmp/ec2-key.pem /tmp/backend.env
+        else
+          echo "Deploying to Auto Scaling Group"
+          ASG_NAME="academic-saas-dev-backend-asg"
+          
+          # Get instance IPs from ASG
+          INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names $ASG_NAME \
+            --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+            --output text)
+          
+          if [ -z "$INSTANCE_IDS" ]; then
+            echo "No running instances found in ASG"
+            exit 1
+          fi
+          
+          # Deploy to each instance
+          for INSTANCE_ID in $INSTANCE_IDS; do
+            INSTANCE_IP=$(aws ec2 describe-instances \
+              --instance-ids $INSTANCE_ID \
+              --query 'Reservations[0].Instances[0].PublicIpAddress' \
+              --output text)
+            
+            if [ "$INSTANCE_IP" != "null" ] && [ "$INSTANCE_IP" != "" ]; then
+              echo "Deploying to instance $INSTANCE_ID ($INSTANCE_IP)"
+              
+              # Setup SSH key
+              echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
+              chmod 600 /tmp/ec2-key.pem
+              
+              # Create environment file
+              {
+                echo "SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}"
+                echo "DEBUG=False"
+                echo "DATABASE_URL=${{ secrets.DATABASE_URL }}"
+                echo "REDIS_URL=${{ secrets.REDIS_URL }}"
+                echo "ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}"
+                echo "CORS_ALLOWED_ORIGINS=${{ secrets.CORS_ALLOWED_ORIGINS }}"
+                echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}"
+                echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+                echo "AWS_S3_REGION_NAME=${{ env.AWS_REGION }}"
+                echo "AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME }}"
+              } > /tmp/backend.env
+              
+              # Deploy via SSH
+              ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+              scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/backend.env ubuntu@$INSTANCE_IP:/tmp/backend.env
+              
+              # Create deployment script
+              {
+                echo "#!/bin/bash"
+                echo "set -e"
+                echo "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin \$1"
+                echo "docker pull \$2"
+                echo "sudo mkdir -p /opt/academic-saas"
+                echo "sudo cp /tmp/backend.env /opt/academic-saas/.env.backend"
+                echo "sudo chown root:root /opt/academic-saas/.env.backend"
+                echo "sudo chmod 600 /opt/academic-saas/.env.backend"
+                echo "docker stop academic-saas-backend || true"
+                echo "docker rm academic-saas-backend || true"
+                echo "docker run -d --name academic-saas-backend --restart unless-stopped -p 8000:8000 --env-file /opt/academic-saas/.env.backend \$2"
+                echo "sleep 30"
+                echo "curl -f http://localhost:8000/admin/login/ || exit 1"
+                echo "echo 'Backend deployment completed successfully'"
+                echo "rm -f /tmp/backend.env"
+              } > /tmp/deploy-backend.sh
+              
+              # Execute deployment
+              scp -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no /tmp/deploy-backend.sh ubuntu@$INSTANCE_IP:/tmp/deploy-backend.sh
+              ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ubuntu@$INSTANCE_IP "chmod +x /tmp/deploy-backend.sh && /tmp/deploy-backend.sh $ECR_REGISTRY $IMAGE_URI"
+              
+              # Clean up
+              rm -f /tmp/ec2-key.pem
+            else
+              echo "Instance $INSTANCE_ID has no public IP, skipping"
+            fi
+          done
+        fi
+
+    - name: Run Database Migrations
+      env:
+        IMAGE_URI: ${{ steps.build-image.outputs.image }}
+      run: |
+        DEV_INSTANCE_IP="${{ secrets.DEV_INSTANCE_IP }}"
+        
+        if [ -n "$DEV_INSTANCE_IP" ]; then
+          echo "Running migrations on development instance"
+          
+          # Setup SSH key
+          echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
+          chmod 600 /tmp/ec2-key.pem
+          
+          # Run migrations
+          ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$DEV_INSTANCE_IP \
+            "docker exec academic-saas-backend python manage.py migrate"
+          
+          # Collect static files
+          ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$DEV_INSTANCE_IP \
+            "docker exec academic-saas-backend python manage.py collectstatic --noinput"
+          
+          # Clean up
+          rm -f /tmp/ec2-key.pem
+        fi
+
+    - name: Verify deployment
+      run: |
+        # Wait for deployment to complete
+        sleep 60
+        
+        DEV_INSTANCE_IP="${{ secrets.DEV_INSTANCE_IP }}"
+        
+        if [ -n "$DEV_INSTANCE_IP" ]; then
+          # Test single development instance
+          BACKEND_URL="http://$DEV_INSTANCE_IP:8000"
+          echo "Testing backend at $BACKEND_URL"
+          curl -f $BACKEND_URL/admin/login/ || exit 1
+          echo "✅ Backend deployment verification completed"
+        else
+          # Test via load balancer
+          BACKEND_URL="http://academic-saas-dev-backend-alb-*.us-east-1.elb.amazonaws.com"
+          curl -f $BACKEND_URL/admin/login/ || exit 1
+          echo "✅ Backend deployment verification completed"
+        fi
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "🎉 Backend deployment successful!"
+          echo "✅ Application is live and healthy"
+        else
+          echo "❌ Backend deployment failed!"
+          echo "💥 Please check the logs for more details"
+        fi
