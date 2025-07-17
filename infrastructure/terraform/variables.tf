@@ -161,6 +161,13 @@ variable "certificate_arn" {
 }
 
 # Environment-specific overrides
+# Development mode toggle
+variable "dev_minimal_mode" {
+  description = "Enable minimal development mode (single instance, no load balancer)"
+  type        = bool
+  default     = true
+}
+
 variable "environment_config" {
   description = "Environment-specific configuration"
   type = map(object({
@@ -177,15 +184,15 @@ variable "environment_config" {
   }))
   default = {
     dev = {
-      backend_instance_type     = "t3.small"
-      frontend_instance_type    = "t3.micro"
-      db_instance_class        = "db.t3.micro"
+      backend_instance_type     = "t2.micro"    # Free tier eligible
+      frontend_instance_type    = "t2.micro"    # Free tier eligible
+      db_instance_class        = "db.t3.micro"  # Free tier eligible
       redis_node_type          = "cache.t3.micro"
       backend_min_size         = 1
-      backend_max_size         = 3
+      backend_max_size         = 1
       backend_desired_capacity = 1
       frontend_min_size        = 1
-      frontend_max_size        = 2
+      frontend_max_size        = 1
       frontend_desired_capacity = 1
     }
     staging = {

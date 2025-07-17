@@ -1,11 +1,12 @@
-# Launch Template for Backend Servers
+# Launch Template for Backend Servers (disabled in minimal dev mode)
 resource "aws_launch_template" "backend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name_prefix   = "${var.project_name}-${var.environment}-backend-"
   image_id      = data.aws_ami.amazon_linux.id
   instance_type = var.environment_config[var.environment].backend_instance_type
   key_name      = aws_key_pair.main.key_name
 
-  vpc_security_group_ids = [aws_security_group.app.id]
+  vpc_security_group_ids = [aws_security_group.app[0].id]
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2.name
@@ -27,14 +28,15 @@ resource "aws_launch_template" "backend" {
   }
 }
 
-# Launch Template for Frontend Servers
+# Launch Template for Frontend Servers (disabled in minimal dev mode)
 resource "aws_launch_template" "frontend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name_prefix   = "${var.project_name}-${var.environment}-frontend-"
   image_id      = data.aws_ami.amazon_linux.id
   instance_type = var.environment_config[var.environment].frontend_instance_type
   key_name      = aws_key_pair.main.key_name
 
-  vpc_security_group_ids = [aws_security_group.app.id]
+  vpc_security_group_ids = [aws_security_group.app[0].id]
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2.name
@@ -43,7 +45,7 @@ resource "aws_launch_template" "frontend" {
   user_data = base64encode(templatefile("${path.module}/user_data/frontend.sh", {
     environment        = var.environment
     project_name      = var.project_name
-    backend_alb_dns   = aws_lb.backend.dns_name
+    backend_alb_dns   = aws_lb.backend[0].dns_name
     aws_region        = var.aws_region
   }))
 
@@ -61,11 +63,12 @@ resource "aws_launch_template" "frontend" {
   }
 }
 
-# Auto Scaling Group for Backend
+# Auto Scaling Group for Backend (disabled in minimal dev mode)
 resource "aws_autoscaling_group" "backend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name                = "${var.project_name}-${var.environment}-backend-asg"
   vpc_zone_identifier = aws_subnet.private[*].id
-  target_group_arns   = [aws_lb_target_group.backend.arn]
+  target_group_arns   = [aws_lb_target_group.backend[0].arn]
   health_check_type   = "ELB"
   health_check_grace_period = 300
 
@@ -74,7 +77,7 @@ resource "aws_autoscaling_group" "backend" {
   desired_capacity = var.environment_config[var.environment].backend_desired_capacity
 
   launch_template {
-    id      = aws_launch_template.backend.id
+    id      = aws_launch_template.backend[0].id
     version = "$Latest"
   }
 
@@ -106,11 +109,12 @@ resource "aws_autoscaling_group" "backend" {
   }
 }
 
-# Auto Scaling Group for Frontend
+# Auto Scaling Group for Frontend (disabled in minimal dev mode)
 resource "aws_autoscaling_group" "frontend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name                = "${var.project_name}-${var.environment}-frontend-asg"
   vpc_zone_identifier = aws_subnet.private[*].id
-  target_group_arns   = [aws_lb_target_group.frontend.arn]
+  target_group_arns   = [aws_lb_target_group.frontend[0].arn]
   health_check_type   = "ELB"
   health_check_grace_period = 300
 
@@ -119,7 +123,7 @@ resource "aws_autoscaling_group" "frontend" {
   desired_capacity = var.environment_config[var.environment].frontend_desired_capacity
 
   launch_template {
-    id      = aws_launch_template.frontend.id
+    id      = aws_launch_template.frontend[0].id
     version = "$Latest"
   }
 
@@ -157,7 +161,7 @@ resource "aws_autoscaling_policy" "backend_scale_up" {
   scaling_adjustment     = 2
   adjustment_type        = "ChangeInCapacity"
   cooldown              = var.scale_up_cooldown
-  autoscaling_group_name = aws_autoscaling_group.backend.name
+  autoscaling_group_name = aws_autoscaling_group.backend[0].name
 }
 
 resource "aws_autoscaling_policy" "backend_scale_down" {
@@ -165,7 +169,7 @@ resource "aws_autoscaling_policy" "backend_scale_down" {
   scaling_adjustment     = -1
   adjustment_type        = "ChangeInCapacity"
   cooldown              = var.scale_down_cooldown
-  autoscaling_group_name = aws_autoscaling_group.backend.name
+  autoscaling_group_name = aws_autoscaling_group.backend[0].name
 }
 
 # Auto Scaling Policies for Frontend
@@ -174,7 +178,7 @@ resource "aws_autoscaling_policy" "frontend_scale_up" {
   scaling_adjustment     = 2
   adjustment_type        = "ChangeInCapacity"
   cooldown              = var.scale_up_cooldown
-  autoscaling_group_name = aws_autoscaling_group.frontend.name
+  autoscaling_group_name = aws_autoscaling_group.frontend[0].name
 }
 
 resource "aws_autoscaling_policy" "frontend_scale_down" {
@@ -182,7 +186,7 @@ resource "aws_autoscaling_policy" "frontend_scale_down" {
   scaling_adjustment     = -1
   adjustment_type        = "ChangeInCapacity"
   cooldown              = var.scale_down_cooldown
-  autoscaling_group_name = aws_autoscaling_group.frontend.name
+  autoscaling_group_name = aws_autoscaling_group.frontend[0].name
 }
 
 # CloudWatch Alarms for Backend Auto Scaling

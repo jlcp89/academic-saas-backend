@@ -21,10 +21,11 @@ resource "aws_eip" "frontend_lb" {
 
 # Associate EIPs with Load Balancers
 resource "aws_lb" "backend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name               = "${var.project_name}-${var.environment}-backend-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
+  security_groups    = [aws_security_group.alb[0].id]
   subnets           = aws_subnet.public[*].id
 
   enable_deletion_protection = var.environment == "prod"
@@ -36,10 +37,11 @@ resource "aws_lb" "backend" {
 }
 
 resource "aws_lb" "frontend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name               = "${var.project_name}-${var.environment}-frontend-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
+  security_groups    = [aws_security_group.alb[0].id]
   subnets           = aws_subnet.public[*].id
 
   enable_deletion_protection = var.environment == "prod"
@@ -52,6 +54,7 @@ resource "aws_lb" "frontend" {
 
 # Target Groups
 resource "aws_lb_target_group" "backend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name     = "${var.project_name}-${var.environment}-backend-tg"
   port     = 8000
   protocol = "HTTP"
@@ -75,6 +78,7 @@ resource "aws_lb_target_group" "backend" {
 }
 
 resource "aws_lb_target_group" "frontend" {
+  count = var.dev_minimal_mode ? 0 : 1
   name     = "${var.project_name}-${var.environment}-frontend-tg"
   port     = 3000
   protocol = "HTTP"
@@ -99,24 +103,26 @@ resource "aws_lb_target_group" "frontend" {
 
 # Load Balancer Listeners
 resource "aws_lb_listener" "backend" {
-  load_balancer_arn = aws_lb.backend.arn
+  count = var.dev_minimal_mode ? 0 : 1
+  load_balancer_arn = aws_lb.backend[0].arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.backend.arn
+    target_group_arn = aws_lb_target_group.backend[0].arn
   }
 }
 
 resource "aws_lb_listener" "frontend" {
-  load_balancer_arn = aws_lb.frontend.arn
+  count = var.dev_minimal_mode ? 0 : 1
+  load_balancer_arn = aws_lb.frontend[0].arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.frontend.arn
+    target_group_arn = aws_lb_target_group.frontend[0].arn
   }
 }
 

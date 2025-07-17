@@ -152,6 +152,7 @@ resource "aws_route_table_association" "private" {
 
 # Security Groups
 resource "aws_security_group" "alb" {
+  count = var.dev_minimal_mode ? 0 : 1
   name        = "${var.project_name}-alb-sg"
   description = "Security group for Application Load Balancer"
   vpc_id      = aws_vpc.main.id
@@ -184,6 +185,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_security_group" "app" {
+  count = var.dev_minimal_mode ? 0 : 1
   name        = "${var.project_name}-app-sg"
   description = "Security group for application servers"
   vpc_id      = aws_vpc.main.id
@@ -192,14 +194,14 @@ resource "aws_security_group" "app" {
     from_port       = 8000
     to_port         = 8000
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    security_groups = [aws_security_group.alb[0].id]
   }
 
   ingress {
     from_port       = 3000
     to_port         = 3000
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    security_groups = [aws_security_group.alb[0].id]
   }
 
   ingress {
