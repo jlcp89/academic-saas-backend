@@ -4,17 +4,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Environment Setup
+### Full Stack Local Development (Recommended)
 ```bash
+# From project root directory (contains both academic_saas/ and academic-saas-frontend/)
+./run_local.sh
+```
+
+This script automatically:
+- Sets up both backend and frontend environments
+- Creates virtual environment and installs dependencies
+- Configures environment variables
+- Runs database migrations
+- Creates superuser (admin/admin123)
+- Starts both servers in parallel
+
+**Access URLs:**
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- Django Admin: http://localhost:8000/admin/
+- API Docs: http://localhost:8000/api/docs/
+
+### Backend Only Setup
+```bash
+# Navigate to backend directory
+cd academic_saas
+
 # Activate virtual environment
 source academic_saas_env/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-```
 
-### Running the Application
-```bash
 # Quick start with automated setup
 ./run_app.sh
 
@@ -115,6 +135,14 @@ This is a Django REST Framework-based multi-tenant academic management system wh
 - Admin user: `admin` / `admin123`
 - Admin panel: http://localhost:8000/admin/
 
+### Current Deployment Status
+**Development Environment (Active):**
+- Frontend: http://107.21.145.151:3000
+- Backend API: http://107.21.145.151:8000
+- Django Admin: http://107.21.145.151:8000/admin/
+- API Docs: http://107.21.145.151:8000/api/docs/
+- Credentials: `admin / admin123`
+
 ### Static and Media Files
 - Static files served via WhiteNoise in production
 - Media files stored locally in `media/` directory
@@ -153,6 +181,9 @@ npm start
 
 # Lint code
 npm run lint
+
+# Type checking
+npx tsc --noEmit
 ```
 
 ### Frontend Project Structure
@@ -234,6 +265,13 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ### Development Workflow
 
+**Option 1: Automated Full Stack (Recommended)**
+```bash
+# From project root directory
+./run_local.sh
+```
+
+**Option 2: Manual Setup**
 1. **Start Both Servers**:
    ```bash
    # Terminal 1: Backend (Django)
@@ -714,6 +752,35 @@ aws ec2 describe-addresses --query "Addresses[?InstanceId==null]"
 6. **Usar variables de entorno correctas** para comunicación entre servicios
 7. **Verificar security groups** si hay problemas de conectividad
 8. **Mantener backups** de datos críticos antes de cambios importantes
+
+### Common Development Issues
+
+1. **Frontend data not updating**: NextAuth.js caches user data in JWT tokens. Solution: logout/login or force refresh
+2. **CORS errors**: Verify CORS_ALLOWED_ORIGINS in Django settings includes frontend URL
+3. **Database connection issues**: Check DATABASE_URL environment variable
+4. **Authentication failures**: Verify NEXT_PUBLIC_API_URL points to correct backend
+
+### Project Scripts Reference
+
+- `./run_local.sh`: Full stack local development (root directory)
+- `./run_app.sh`: Backend only (academic_saas directory)
+- `./deploy-full-stack.sh`: Production deployment script
+- `./verificar-infraestructura.sh`: Infrastructure verification
+
+### Repository Structure
+
+```
+project-root/
+├── academic_saas/           # Django backend repository
+├── academic-saas-frontend/  # Next.js frontend repository
+├── run_local.sh            # Full stack development script
+└── *.sh                    # Various deployment/setup scripts
+```
+
+### Git Repositories
+
+- **Backend**: https://github.com/jlcp89/academic-saas-backend
+- **Frontend**: https://github.com/jlcp89/academic-saas-frontend
 
 ### Próximos Pasos Recomendados
 

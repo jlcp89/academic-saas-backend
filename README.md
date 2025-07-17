@@ -24,12 +24,39 @@ academic_saas/
 └── manage.py
 ```
 
-## Setup Instructions
+## Local Development
+
+### Quick Start (Full Stack)
+
+If you have both backend and frontend repositories, use the automated script:
+
+```bash
+# From the parent directory containing both repos
+./run_local.sh
+```
+
+This script will:
+- Set up both backend and frontend environments
+- Install all dependencies
+- Configure environment variables
+- Run database migrations
+- Create superuser automatically
+- Start both servers in parallel
+
+**Access URLs:**
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- Django Admin: http://localhost:8000/admin/
+- API Docs: http://localhost:8000/api/docs/
+
+**Default Credentials:** `admin / admin123`
+
+### Manual Backend Setup
 
 1. **Create virtual environment**:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   python -m venv academic_saas_env
+   source academic_saas_env/bin/activate  # On Windows: academic_saas_env\Scripts\activate
    ```
 
 2. **Install dependencies**:
@@ -38,8 +65,14 @@ academic_saas/
    ```
 
 3. **Configure environment variables**:
-   - Copy `.env.example` to `.env`
-   - Update database credentials and other settings
+   Create `.env` file with:
+   ```bash
+   SECRET_KEY=django-insecure-local-development-key-12345
+   DEBUG=True
+   DATABASE_URL=sqlite:///db.sqlite3
+   ALLOWED_HOSTS=localhost,127.0.0.1
+   CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+   ```
 
 4. **Run migrations**:
    ```bash
@@ -51,9 +84,14 @@ academic_saas/
    python manage.py createsuperuser
    ```
 
-6. **Run development server**:
+6. **Quick start script**:
    ```bash
-   python manage.py runserver
+   ./run_app.sh
+   ```
+
+   Or manually:
+   ```bash
+   python manage.py runserver 0.0.0.0:8000
    ```
 
 ## API Endpoints
@@ -101,19 +139,79 @@ python manage.py test
 
 ## Deployment
 
-For production deployment:
-1. Set `DEBUG=False` in environment variables
-2. Configure PostgreSQL database
-3. Set up static file serving
-4. Configure ALLOWED_HOSTS
-5. Use gunicorn or similar WSGI server
+### Development Environment (Active)
+
+The development environment is currently deployed and accessible at:
+
+- **Frontend**: http://107.21.145.151:3000
+- **Backend API**: http://107.21.145.151:8000
+- **Django Admin**: http://107.21.145.151:8000/admin/
+- **API Docs**: http://107.21.145.151:8000/api/docs/
+
+**Credentials:** `admin / admin123`
+
+### Deployment Process
+
+#### Automatic Deployment (GitHub Actions)
+
+1. **Push to main branch** triggers automatic deployment
+2. **GitHub Actions** builds and pushes Docker images to ECR
+3. **EC2 instances** automatically pull and deploy the new images
+
+#### Manual Deployment
+
+```bash
+# Deploy backend
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 860639121390.dkr.ecr.us-east-1.amazonaws.com
+
+# Access EC2 instance
+ssh -i ~/.ssh/academic_saas_aws ec2-user@107.21.145.151
+
+# Deploy latest backend image
+docker pull 860639121390.dkr.ecr.us-east-1.amazonaws.com/academic-saas-backend:latest
+docker stop academic-saas-backend || true
+docker rm academic-saas-backend || true
+docker run -d --name academic-saas-backend --restart unless-stopped --network host -e DATABASE_URL=postgresql://academic_user:supersecret123@postgres:5432/academic_saas_dev -e REDIS_URL=redis://redis:6379/0 -e SECRET_KEY=django-insecure-temp-key-for-development-only-12345 -e DEBUG=True -e ALLOWED_HOSTS=* -e CORS_ALLOWED_ORIGINS=http://localhost:3000,http://107.21.145.151:3000 860639121390.dkr.ecr.us-east-1.amazonaws.com/academic-saas-backend:latest
+```
+
+### Infrastructure
+
+**Current Setup:**
+- **AWS EC2**: t2.micro instance (107.21.145.151)
+- **Docker Containers**: PostgreSQL, Redis, Django, Next.js
+- **ECR**: Container registry for images
+- **GitHub Actions**: CI/CD pipeline
+
+**Monitoring:**
+```bash
+# Check container status
+docker ps
+
+# View logs
+docker logs academic-saas-backend
+
+# Access database
+docker exec -it postgres psql -U academic_user -d academic_saas_dev
+```
+
+### Environment Variables (Production)
+
+```bash
+SECRET_KEY=django-insecure-temp-key-for-development-only-12345
+DEBUG=True
+DATABASE_URL=postgresql://academic_user:supersecret123@postgres:5432/academic_saas_dev
+REDIS_URL=redis://redis:6379/0
+ALLOWED_HOSTS=*
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://107.21.145.151:3000
+```
 
 ## Deployment Status
-- Infrastructure: ✅ Deployed
-- Backend: 🔄 Deploying with PostgreSQL Docker
-- Frontend: 🔄 Pending
+- Infrastructure: ✅ Deployed (AWS EC2)
+- Backend: ✅ Active (http://107.21.145.151:8000)
+- Frontend: ✅ Active (http://107.21.145.151:3000)
 - Database: ✅ PostgreSQL in Docker
 - Cache: ✅ Redis in Docker
+- CI/CD: ✅ GitHub Actions configured
 
 ## License
 
