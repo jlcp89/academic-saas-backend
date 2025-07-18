@@ -1,0 +1,107 @@
+name: Deploy Backend to DEV (Push)
+
+on:
+  push:
+    branches: [ dev ]
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy-dev:
+    name: Deploy to DEV Environment
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Deploy Django Backend to EC2 (dev)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST_DEV }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "🚀 Iniciando despliegue del backend..."
+            
+            # Configurar variables de entorno
+            export ENVIRONMENT=dev
+            export DATABASE_URL=${{ secrets.DATABASE_URL_DEV }}
+            export REDIS_URL=${{ secrets.REDIS_URL_DEV }}
+            export SECRET_KEY=${{ secrets.SECRET_KEY_DEV }}
+            export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            export AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME_DEV }}
+            
+            cd /home/ec2-user
+            echo "🧹 Limpiando despliegue anterior..."
+            sudo rm -rf academic-saas-backend
+            
+            echo "📥 Clonando repositorio backend..."
+            git clone --depth 1 --branch dev https://github.com/jlcp89/academic-saas-backend.git academic-saas-backend
+            
+            cd academic-saas-backend
+            
+            echo "🐳 Construyendo imagen Docker..."
+            sudo docker build -t academic-saas-backend:dev .
+            
+            echo "🛑 Deteniendo contenedores existentes..."
+            sudo docker-compose -f docker-compose.dev.yml down || true
+            
+            # Crear archivo .env para docker-compose
+            echo "⚙️ Configurando variables de entorno..."
+            cat > .env << EOF
+            DATABASE_URL=${{ secrets.DATABASE_URL_DEV }}
+            REDIS_URL=${{ secrets.REDIS_URL_DEV }}
+            SECRET_KEY=${{ secrets.SECRET_KEY_DEV }}
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME_DEV }}
+            DEBUG=True
+            ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
+            EOF
+            
+            echo "🚀 Iniciando servicios..."
+            sudo docker-compose -f docker-compose.dev.yml up -d
+            
+            echo "⏳ Esperando que los servicios estén listos..."
+            sleep 30
+            
+            echo "🔄 Ejecutando migraciones..."
+            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py migrate
+            
+            echo "📁 Recolectando archivos estáticos..."
+            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py collectstatic --noinput
+            
+            echo "🔍 Verificando salud del servicio..."
+            sleep 10
+            
+            # Verificar que esté funcionando
+            if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+              echo "✅ Backend desplegado exitosamente!"
+              echo "🌐 URL: http://${{ secrets.EC2_HOST_DEV }}:8000"
+              echo "🔧 Admin: http://${{ secrets.EC2_HOST_DEV }}:8000/admin"
+            else
+              echo "❌ Error: El backend no responde"
+              sudo docker-compose -f docker-compose.dev.yml logs
+              exit 1
+            fi
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verificando despliegue del backend..."
+          sleep 10
+          curl -f http://${{ secrets.EC2_HOST_DEV }}:8000/admin/login/ || exit 1
+          echo "✅ Verificación del backend completada exitosamente!"
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "🎉 Backend deployment successful!"
+            echo "✅ Application is live and healthy"
+            echo "🌐 API URL: http://${{ secrets.EC2_HOST_DEV }}:8000"
+            echo "🔧 Admin URL: http://${{ secrets.EC2_HOST_DEV }}:8000/admin"
+          else
+            echo "❌ Backend deployment failed!"
+            echo "🔍 Check the logs above for more details"
+          fi 

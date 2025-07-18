@@ -268,3 +268,17 @@ All Django API endpoints are integrated with typed React Query hooks:
 - Can be deployed to Vercel, Netlify, or any static hosting
 - Requires environment variables for production API URL
 - NextAuth.js requires secure session configuration for production
+
+### Production Deployment
+
+**Development Environment:**
+- **IP Address**: 107.21.145.151
+- **Backend**: http://107.21.145.151:8000
+- **Frontend**: http://107.21.145.151:3000
+- **Admin Panel**: http://107.21.145.151:8000/admin/
+
+**GitHub Actions Deployment:**
+- Deployments to dev environment are automatically triggered on pull requests to `dev` branch
+- Deployments to production environment are triggered when PRs to `main` branch are merged
+- Both backend and frontend use SSH direct deployment strategy
+- Health checks are performed after deployment to ensure services are running correctly
