@@ -27,22 +27,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
+# Copy entrypoint script and make it executable
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Change ownership to app user
 RUN chown -R app:app /app
-
-# Create entrypoint script
-RUN echo '#!/bin/bash\n\
-set -e\n\
-\n\
-# Run migrations\n\
-python manage.py migrate --noinput || true\n\
-\n\
-# Collect static files\n\
-python manage.py collectstatic --noinput || true\n\
-\n\
-# Start gunicorn with sync workers (gevent compatibility issues)\n\
-exec gunicorn --bind 0.0.0.0:8000 --workers 4 --worker-class sync --timeout 120 --access-logfile - --error-logfile - core.wsgi:application\n\
-' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Switch to app user
 USER app
