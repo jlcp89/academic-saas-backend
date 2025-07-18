@@ -90,22 +90,22 @@ jobs:
     - name: Deploy to Development Instance
       env:
         IMAGE_URI: ${{ needs.test-and-build.outputs.image-uri }}
-        DEV_INSTANCE_IP: ${{ secrets.DEV_INSTANCE_IP }}
+        EC2_INSTANCE_IP: ${{ secrets.EC2_INSTANCE_IP }}
       run: |
-        if [ -z "$DEV_INSTANCE_IP" ]; then
-          echo "❌ DEV_INSTANCE_IP secret not configured"
+        if [ -z "$EC2_INSTANCE_IP" ]; then
+          echo "❌ EC2_INSTANCE_IP secret not configured"
           exit 1
         fi
         
         echo "🚀 Deploying image: $IMAGE_URI"
-        echo "📍 Target server: $DEV_INSTANCE_IP"
+        echo "📍 Target server: $EC2_INSTANCE_IP"
         
         # Setup SSH key
         echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
         chmod 600 /tmp/ec2-key.pem
         
         # Simple deployment command
-        ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$DEV_INSTANCE_IP << 'ENDSSH'
+        ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$EC2_INSTANCE_IP << 'ENDSSH'
         # Login to ECR
         aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 860639121390.dkr.ecr.us-east-1.amazonaws.com
         
@@ -154,5 +154,5 @@ jobs:
         echo "- Deploy: ${{ needs.deploy-dev.result }}"
         
         if [ "${{ needs.deploy-dev.result }}" == "success" ]; then
-          echo "✅ Backend deployed successfully to http://${{ secrets.DEV_INSTANCE_IP }}:8000"
+          echo "✅ Backend deployed successfully to http://${{ secrets.EC2_INSTANCE_IP }}:8000"
         fi
