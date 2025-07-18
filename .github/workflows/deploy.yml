@@ -90,22 +90,22 @@ jobs:
     - name: Deploy to Development Instance
       env:
         IMAGE_URI: ${{ needs.test-and-build.outputs.image-uri }}
-        EC2_INSTANCE_IP: ${{ secrets.EC2_INSTANCE_IP }}
+        EC2_HOST_DEV: ${{ secrets.EC2_HOST_DEV }}
       run: |
-        if [ -z "$EC2_INSTANCE_IP" ]; then
-          echo "❌ EC2_INSTANCE_IP secret not configured"
+        if [ -z "$EC2_HOST_DEV" ]; then
+          echo "❌ EC2_HOST_DEV secret not configured"
           exit 1
         fi
         
         echo "🚀 Deploying image: $IMAGE_URI"
-        echo "📍 Target server: $EC2_INSTANCE_IP"
+        echo "📍 Target server: $EC2_HOST_DEV"
         
         # Setup SSH key
         echo "${{ secrets.EC2_SSH_KEY }}" > /tmp/ec2-key.pem
         chmod 600 /tmp/ec2-key.pem
         
         # Simple deployment command
-        ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$EC2_INSTANCE_IP << 'ENDSSH'
+        ssh -i /tmp/ec2-key.pem -o StrictHostKeyChecking=no ec2-user@$EC2_HOST_DEV << 'ENDSSH'
         # Login to ECR
         aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 860639121390.dkr.ecr.us-east-1.amazonaws.com
         
@@ -118,12 +118,12 @@ jobs:
           --name academic-saas-backend \
           --restart unless-stopped \
           --network host \
-          -e SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
+          -e SECRET_KEY="${{ secrets.SECRET_KEY }}" \
           -e DEBUG=True \
           -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
           -e REDIS_URL="${{ secrets.REDIS_URL }}" \
           -e ALLOWED_HOSTS="${{ secrets.ALLOWED_HOSTS }}" \
-          -e CORS_ALLOWED_ORIGINS="${{ secrets.CORS_ALLOWED_ORIGINS }}" \
+          -e CORS_ALLOWED_ORIGINS="http://107.21.145.151:3000" \
           -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
           -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
           -e AWS_S3_REGION_NAME="us-east-1" \
@@ -154,5 +154,5 @@ jobs:
         echo "- Deploy: ${{ needs.deploy-dev.result }}"
         
         if [ "${{ needs.deploy-dev.result }}" == "success" ]; then
-          echo "✅ Backend deployed successfully to http://${{ secrets.EC2_INSTANCE_IP }}:8000"
+          echo "✅ Backend deployed successfully to http://${{ secrets.EC2_HOST_DEV }}:8000"
         fi
