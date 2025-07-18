@@ -2,6 +2,9 @@
 
 A multi-tenant academic management SaaS application built with Django and Django REST Framework.
 
+## CI/CD Status
+🚀 Automated deployment pipeline configured for dev and production environments.
+
 ## Features
 
 - **Multi-Tenant Architecture**: Each school operates in a securely isolated environment
