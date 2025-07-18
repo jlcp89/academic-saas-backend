@@ -11,6 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user for security
@@ -29,18 +30,29 @@ COPY . .
 # Change ownership to app user
 RUN chown -R app:app /app
 
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Run migrations\n\
+python manage.py migrate --noinput || true\n\
+\n\
+# Collect static files\n\
+python manage.py collectstatic --noinput || true\n\
+\n\
+# Start gunicorn with sync workers (gevent compatibility issues)\n\
+exec gunicorn --bind 0.0.0.0:8000 --workers 4 --worker-class sync --timeout 120 --access-logfile - --error-logfile - core.wsgi:application\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
 # Switch to app user
 USER app
 
-# Collect static files
-RUN python manage.py collectstatic --noinput
-
-# Health check using curl instead of requests
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/admin/login/ || exit 1
+    CMD curl -f http://localhost:8000/api/ || exit 1
 
 # Expose port
 EXPOSE 8000
 
-# Production command with gunicorn for high concurrency
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--worker-class", "gevent", "--worker-connections", "1000", "--max-requests", "1000", "--max-requests-jitter", "100", "--preload", "core.wsgi:application"]
+# Use entrypoint script
+CMD ["/app/entrypoint.sh"]
