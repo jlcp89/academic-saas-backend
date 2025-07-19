@@ -43,33 +43,80 @@ jobs:
             
             echo "🐍 Configurando Python, PostgreSQL y dependencias..."
             
-            # Install Python 3.8 if not present
-            if ! command -v python3.8 &> /dev/null; then
-              echo "Installing Python 3.8..."
-              sudo yum update -y
-              sudo yum install -y amazon-linux-extras
-              sudo amazon-linux-extras enable python3.8
-              sudo yum install -y python3.8 python3.8-pip
+            # Detect OS and set package manager
+            if [ -f /etc/amazon-linux-release ] || [ -f /etc/system-release ]; then
+              echo "Detected Amazon Linux 2"
+              PKG_MANAGER="yum"
+              PYTHON_CMD="python3.8"
+              PG_SETUP_CMD="postgresql-setup initdb"
+              PG_SERVICE="postgresql"
+            elif [ -f /etc/lsb-release ] || [ -f /etc/debian_version ]; then
+              echo "Detected Ubuntu/Debian"
+              PKG_MANAGER="apt"
+              PYTHON_CMD="python3"
+              PG_SETUP_CMD=""
+              PG_SERVICE="postgresql"
+            else
+              echo "Unknown OS, defaulting to yum"
+              PKG_MANAGER="yum"
+              PYTHON_CMD="python3.8"
+              PG_SETUP_CMD="postgresql-setup initdb"
+              PG_SERVICE="postgresql"
+            fi
+            
+            # Install Python based on OS
+            if ! command -v $PYTHON_CMD &> /dev/null; then
+              echo "Installing Python..."
+              if [ "$PKG_MANAGER" = "yum" ]; then
+                sudo yum update -y
+                sudo yum install -y amazon-linux-extras
+                sudo amazon-linux-extras enable python3.8
+                sudo yum install -y python3.8 python3.8-pip
+              else
+                sudo apt update -y
+                sudo apt install -y python3 python3-pip python3-venv
+              fi
             fi
             
             # Install and configure PostgreSQL
             echo "Setting up PostgreSQL..."
-            sudo yum install -y postgresql postgresql-server postgresql-devel
+            if [ "$PKG_MANAGER" = "yum" ]; then
+              sudo yum install -y postgresql postgresql-server postgresql-devel
+            else
+              sudo apt install -y postgresql postgresql-contrib libpq-dev
+            fi
             
-            # Initialize PostgreSQL if not already done
-            if [ ! -f /var/lib/pgsql/data/postgresql.conf ]; then
-              echo "Initializing PostgreSQL..."
-              sudo postgresql-setup initdb
+            # Initialize and configure PostgreSQL based on OS
+            if [ "$PKG_MANAGER" = "yum" ]; then
+              # Amazon Linux 2 PostgreSQL setup
+              if [ ! -f /var/lib/pgsql/data/postgresql.conf ]; then
+                echo "Initializing PostgreSQL..."
+                sudo $PG_SETUP_CMD
+                
+                # Configure PostgreSQL to accept local connections
+                sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf
+                echo "local all all trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
+                echo "host all all 127.0.0.1/32 trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
+              fi
+            else
+              # Ubuntu/Debian PostgreSQL setup
+              echo "Configuring PostgreSQL for Ubuntu..."
+              sudo systemctl status postgresql || echo "PostgreSQL service status checked"
               
-              # Configure PostgreSQL to accept local connections
-              sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf
-              echo "local all all trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
-              echo "host all all 127.0.0.1/32 trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
+              # Configure PostgreSQL to accept local connections (Ubuntu paths)
+              PG_VERSION=$(sudo -u postgres psql -t -c "SELECT version();" | grep -oP '\d+\.\d+' | head -1)
+              PG_CONFIG_DIR="/etc/postgresql/${PG_VERSION}/main"
+              
+              if [ -d "$PG_CONFIG_DIR" ]; then
+                sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" ${PG_CONFIG_DIR}/postgresql.conf || true
+                sudo sed -i "s/local   all             all                                     peer/local   all             all                                     trust/" ${PG_CONFIG_DIR}/pg_hba.conf || true
+                echo "host all all 127.0.0.1/32 trust" | sudo tee -a ${PG_CONFIG_DIR}/pg_hba.conf || true
+              fi
             fi
             
             # Start PostgreSQL
-            sudo systemctl enable postgresql
-            sudo systemctl start postgresql
+            sudo systemctl enable $PG_SERVICE
+            sudo systemctl start $PG_SERVICE
             
             # Create database and user
             sudo -u postgres psql -c "DROP DATABASE IF EXISTS academic_saas_dev;" || true
@@ -79,20 +126,24 @@ jobs:
             sudo -u postgres psql -c "ALTER USER admin CREATEDB;"
             sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO admin;"
             
-            echo "Using Python 3.8..."
-            python3.8 --version
+            echo "Using Python: $PYTHON_CMD"
+            $PYTHON_CMD --version
             
             # Install Python dependencies (skip if already installed recently)
             echo "📦 Instalando dependencias..."
             
-            # Install PostgreSQL development headers for psycopg2 and system tools
-            sudo yum install -y postgresql-devel gcc python3-devel lsof
+            # Install build dependencies based on OS
+            if [ "$PKG_MANAGER" = "yum" ]; then
+              sudo yum install -y postgresql-devel gcc python3-devel lsof
+            else
+              sudo apt install -y build-essential python3-dev lsof
+            fi
             
-            python3.8 -m pip install -r requirements.txt --quiet
+            $PYTHON_CMD -m pip install -r requirements.txt --quiet
             
             # Verify critical dependencies
             echo "🔍 Verifying critical dependencies..."
-            python3.8 -c "
+            $PYTHON_CMD -c "
             import sys
             missing = []
             try:
@@ -168,9 +219,9 @@ jobs:
             echo "DATABASE_URL: $DATABASE_URL"
             
             echo "🔄 Ejecutando migraciones..."
-            python3.8 manage.py migrate || { 
+            $PYTHON_CMD manage.py migrate || { 
               echo "❌ Migration failed, checking database connection:"
-              python3.8 -c "
+              $PYTHON_CMD -c "
               import os
               os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
               import django
@@ -187,7 +238,7 @@ jobs:
             }
             
             echo "👤 Creando superusuario Django..."
-            python3.8 manage.py shell << 'EOF'
+            $PYTHON_CMD manage.py shell << 'EOF'
             from apps.users.models import User
             from apps.organizations.models import School
             
@@ -205,18 +256,18 @@ jobs:
             EOF
             
             echo "📁 Recolectando archivos estáticos..."
-            python3.8 manage.py collectstatic --noinput || { echo "Collectstatic failed"; exit 1; }
+            $PYTHON_CMD manage.py collectstatic --noinput || { echo "Collectstatic failed"; exit 1; }
             
             echo "🚀 Iniciando servidor Django..."
             # First test if Django can start at all
             echo "Testing Django startup..."
             
             echo "🔍 Checking Python environment..."
-            python3.8 --version
-            python3.8 -c "import django; print(f'Django version: {django.get_version()}')"
+            $PYTHON_CMD --version
+            $PYTHON_CMD -c "import django; print(f'Django version: {django.get_version()}')"
             
             echo "🔍 Testing database adapter..."
-            python3.8 -c "
+            $PYTHON_CMD -c "
             try:
                 import psycopg2
                 print('✅ psycopg2 available')
@@ -230,7 +281,7 @@ jobs:
             "
             
             echo "🔍 Testing WSGI module..."
-            python3.8 -c "
+            $PYTHON_CMD -c "
             import os
             os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
             try:
@@ -241,9 +292,9 @@ jobs:
                 exit(1)
             "
             
-            python3.8 manage.py check || { 
+            $PYTHON_CMD manage.py check || { 
               echo "❌ Django check failed"
-              python3.8 manage.py check --deploy || true
+              $PYTHON_CMD manage.py check --deploy || true
               exit 1
             }
             
@@ -252,7 +303,7 @@ jobs:
             sleep 2
             
             echo "🚀 Iniciando gunicorn en puerto 8000..."
-            nohup python3.8 -m gunicorn --bind 127.0.0.1:8000 --workers 2 --pid /tmp/django.pid --log-level debug core.wsgi:application > /tmp/django.log 2>&1 &
+            nohup $PYTHON_CMD -m gunicorn --bind 127.0.0.1:8000 --workers 2 --pid /tmp/django.pid --log-level debug core.wsgi:application > /tmp/django.log 2>&1 &
             
             echo "⏳ Esperando que Django esté listo..."
             sleep 15
@@ -275,7 +326,7 @@ jobs:
             
             # Additional Django debugging
             echo "🔍 Testing Django manually..."
-            timeout 10 python3.8 manage.py runserver 127.0.0.1:8001 --noreload &
+            timeout 10 $PYTHON_CMD manage.py runserver 127.0.0.1:8001 --noreload &
             sleep 3
             if curl -f http://localhost:8001/admin/login/ > /dev/null 2>&1; then
               echo "✅ Django can start manually - issue is with gunicorn"
@@ -286,10 +337,14 @@ jobs:
             fi
             
             echo "🌐 Configurando Nginx..."
-            # Install nginx if not present (Amazon Linux 2 specific)
+            # Install nginx if not present
             if ! command -v nginx &> /dev/null; then
-              echo "Installing nginx via amazon-linux-extras..."
-              sudo amazon-linux-extras install -y nginx1
+              echo "Installing nginx..."
+              if [ "$PKG_MANAGER" = "yum" ]; then
+                sudo amazon-linux-extras install -y nginx1
+              else
+                sudo apt install -y nginx
+              fi
             fi
             
             # Stop nginx if running
