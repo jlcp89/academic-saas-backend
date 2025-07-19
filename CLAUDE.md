@@ -304,3 +304,17 @@ All Django API endpoints are integrated with typed React Query hooks:
 - Deployments to production environment are triggered when PRs to `main` branch are merged
 - Both backend and frontend use SSH direct deployment strategy
 - Health checks are performed after deployment to ensure services are running correctly
+
+### Important Deployment Notes
+
+**Both repositories do NOT use Docker:**
+- All deployments use direct SSH strategy without Docker containers
+- **Backend**: Uses Poetry for dependency management and direct Python execution
+- **Frontend**: Builds static files and serves them through nginx
+- No Docker images, containers, or docker-compose files are used in deployment
+
+**Frontend serves through nginx (NOT PM2):**
+- Frontend deployment copies built files to `/var/www/html/`
+- nginx serves the static Next.js build files directly
+- No Node.js process managers (PM2) are used in production
+- nginx handles all static file serving and routing

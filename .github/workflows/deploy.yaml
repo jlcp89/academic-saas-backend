@@ -44,20 +44,37 @@ jobs:
             
             cd academic-saas-backend
             
-            echo "Building Docker image..."
-            sudo docker build -t academic-saas-backend:dev .
+            echo "Installing Poetry if not present..."
+            if ! command -v poetry &> /dev/null; then
+              curl -sSL https://install.python-poetry.org | python3 -
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
             
-            echo "Stopping existing containers..."
-            sudo docker-compose -f docker-compose.dev.yml down || true
-            
-            echo "Starting services..."
-            sudo docker-compose -f docker-compose.dev.yml up -d
+            echo "Installing dependencies..."
+            poetry install --only=main --no-dev
             
             echo "Running migrations..."
-            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py migrate
+            poetry run python manage.py migrate
             
             echo "Collecting static files..."
-            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py collectstatic --noinput
+            poetry run python manage.py collectstatic --noinput
+            
+            echo "Stopping existing Django process..."
+            pkill -f "python manage.py runserver" || true
+            
+            echo "Starting Django application..."
+            nohup poetry run python manage.py runserver 0.0.0.0:8000 > /dev/null 2>&1 &
+            
+            echo "Waiting for application to start..."
+            sleep 10
+            
+            echo "Verifying deployment..."
+            if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+              echo "✅ Backend deployed successfully in DEV!"
+            else
+              echo "❌ Error: Application not responding"
+              exit 1
+            fi
             
             echo "DEV backend deployment finished."
 
@@ -100,42 +117,37 @@ jobs:
             
             cd academic-saas-backend
             
-            echo "Building Docker image..."
-            sudo docker build -t academic-saas-backend:prod .
+            echo "Installing Poetry if not present..."
+            if ! command -v poetry &> /dev/null; then
+              curl -sSL https://install.python-poetry.org | python3 -
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
             
-            echo "Stopping existing containers..."
-            sudo docker-compose -f docker-compose.prod.yml down
-            
-            echo "Starting services..."
-            sudo docker-compose -f docker-compose.prod.yml up -d
+            echo "Installing dependencies..."
+            poetry install --only=main --no-dev
             
             echo "Running migrations..."
-            sudo docker-compose -f docker-compose.prod.yml exec -T web python manage.py migrate
+            poetry run python manage.py migrate
             
             echo "Collecting static files..."
-            sudo docker-compose -f docker-compose.prod.yml exec -T web python manage.py collectstatic --noinput
+            poetry run python manage.py collectstatic --noinput
+            
+            echo "Stopping existing Django process..."
+            pkill -f "python manage.py runserver" || true
+            
+            echo "Starting Django application..."
+            nohup poetry run python manage.py runserver 0.0.0.0:8000 > /dev/null 2>&1 &
+            
+            echo "Waiting for application to start..."
+            sleep 15
             
             echo "Health check..."
-            sleep 30
-            curl -f http://localhost/admin/login/ || (echo "Health check failed" && exit 1)
+            if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+              echo "✅ Backend deployed successfully in PRODUCTION!"
+            else
+              echo "❌ Health check failed"
+              exit 1
+            fi
             
             echo "PROD backend deployment finished."
 
-  # Cleanup old images
-  cleanup:
-    name: Cleanup Docker Images
-    needs: [deploy_dev, deploy_prod]
-    if: always()
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Cleanup old Docker images
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.EC2_HOST_DEV }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            echo "Cleaning up old Docker images..."
-            sudo docker image prune -f
-            sudo docker system prune -f
