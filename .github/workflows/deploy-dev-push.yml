@@ -85,8 +85,8 @@ jobs:
             # Install Python dependencies (skip if already installed recently)
             echo "📦 Instalando dependencias..."
             
-            # Install PostgreSQL development headers for psycopg2
-            sudo yum install -y postgresql-devel gcc python3-devel
+            # Install PostgreSQL development headers for psycopg2 and system tools
+            sudo yum install -y postgresql-devel gcc python3-devel lsof
             
             python3.8 -m pip install -r requirements.txt --quiet
             
@@ -120,6 +120,9 @@ jobs:
             
             echo "🛑 Verificando y deteniendo servicios existentes..."
             
+            # Temporarily disable exit on error for cleanup section
+            set +e
+            
             # Check if Django is running and stop it gracefully
             if [ -f /tmp/django.pid ]; then
               OLD_PID=$(cat /tmp/django.pid)
@@ -151,8 +154,13 @@ jobs:
             
             # Kill any remaining gunicorn processes
             echo "🔍 Limpiando procesos gunicorn..."
-            pkill -f "gunicorn.*core.wsgi" || true
-            sleep 2
+            if pgrep -f "gunicorn.*core.wsgi" >/dev/null 2>&1; then
+              echo "Encontrados procesos gunicorn, terminándolos..."
+              pkill -f "gunicorn.*core.wsgi" || true
+              sleep 2
+            else
+              echo "✅ No hay procesos gunicorn ejecutándose"
+            fi
             
             # Verify port is free
             if lsof -t -i:8000 >/dev/null 2>&1; then
@@ -162,6 +170,9 @@ jobs:
             fi
             
             echo "✅ Limpieza de procesos completada"
+            
+            # Re-enable exit on error after cleanup
+            set -e
             
             echo "⚙️ Configurando variables de entorno..."
             
