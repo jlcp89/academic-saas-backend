@@ -57,13 +57,21 @@ jobs:
             
             # Install Python dependencies (skip if already installed recently)
             echo "📦 Instalando dependencias..."
-            python3.8 -m pip install --no-deps -r requirements.txt || python3.8 -m pip install -r requirements.txt
+            python3.8 -m pip install -r requirements.txt --quiet
             
-            echo "🛑 Deteniendo servicios existentes..."
-            # More specific process termination
-            sudo pkill -f "gunicorn.*core.wsgi" || echo "No gunicorn process found"
-            sudo pkill -f "python.*manage.py" || echo "No Django process found"
-            sleep 2
+            echo "🛑 Verificando y deteniendo servicios existentes..."
+            # Check if Django is running and stop it gracefully
+            if [ -f /tmp/django.pid ]; then
+              OLD_PID=$(cat /tmp/django.pid)
+              if ps -p $OLD_PID > /dev/null 2>&1; then
+                echo "Terminando proceso Django PID: $OLD_PID"
+                kill $OLD_PID || true
+                sleep 3
+                # Force kill if still running
+                kill -9 $OLD_PID 2>/dev/null || true
+              fi
+              rm -f /tmp/django.pid
+            fi
             
             echo "⚙️ Configurando variables de entorno..."
             cat > .env << EOF
