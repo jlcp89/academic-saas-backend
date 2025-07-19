@@ -42,10 +42,22 @@ jobs:
             cd academic-saas-backend
             
             echo "🐍 Configurando Python y dependencias..."
+            
+            # Install Python 3.9 (Django 4.2.9 requires Python 3.8+)
+            echo "Installing Python 3.9..."
+            sudo yum update -y
+            sudo yum install -y amazon-linux-extras
+            sudo amazon-linux-extras enable python3.8
+            sudo yum install -y python3.8 python3.8-pip
+            
+            # Use Python 3.8 for the rest of the script
+            echo "Using Python 3.8..."
+            python3.8 --version
+            
             # Install Python dependencies with pip
             if [ -f "requirements.txt" ]; then
               echo "📦 Instalando dependencias desde requirements.txt..."
-              pip3 install -r requirements.txt
+              python3.8 -m pip install -r requirements.txt
             else
               echo "❌ Error: requirements.txt no encontrado"
               ls -la
@@ -71,13 +83,13 @@ jobs:
             EOF
             
             echo "🔄 Ejecutando migraciones..."
-            python3 manage.py migrate
+            python3.8 manage.py migrate
             
             echo "📁 Recolectando archivos estáticos..."
-            python3 manage.py collectstatic --noinput
+            python3.8 manage.py collectstatic --noinput
             
             echo "🚀 Iniciando servidor Django..."
-            nohup python3 -m gunicorn --bind 0.0.0.0:8000 --workers 2 --daemon --pid /tmp/django.pid core.wsgi:application
+            nohup python3.8 -m gunicorn --bind 0.0.0.0:8000 --workers 2 --daemon --pid /tmp/django.pid core.wsgi:application
             
             echo "⏳ Esperando que el servicio esté listo..."
             sleep 15
