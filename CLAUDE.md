@@ -294,10 +294,10 @@ All Django API endpoints are integrated with typed React Query hooks:
 ### Production Deployment
 
 **Development Environment:**
-- **IP Address**: 107.21.145.151
-- **Backend**: http://107.21.145.151:8000
-- **Frontend**: http://107.21.145.151:3000
-- **Admin Panel**: http://107.21.145.151:8000/admin/
+- **IP Address**: 52.20.22.173
+- **Backend**: http://52.20.22.173:8000
+- **Frontend**: http://52.20.22.173:3000
+- **Admin Panel**: http://52.20.22.173:8000/admin/
 
 **GitHub Actions Deployment:**
 - Deployments to dev environment are automatically triggered on pull requests to `dev` branch
