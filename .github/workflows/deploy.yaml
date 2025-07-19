@@ -47,8 +47,9 @@ jobs:
             echo "Installing Poetry if not present..."
             if ! command -v poetry &> /dev/null; then
               curl -sSL https://install.python-poetry.org | python3 -
-              export PATH="$HOME/.local/bin:$PATH"
             fi
+            # Ensure Poetry is in PATH
+            export PATH="$HOME/.local/bin:$PATH"
             
             echo "Installing dependencies..."
             poetry install --only=main --no-dev
@@ -59,20 +60,26 @@ jobs:
             echo "Collecting static files..."
             poetry run python manage.py collectstatic --noinput
             
-            echo "Stopping existing Django process..."
-            pkill -f "python manage.py runserver" || true
+            echo "Stopping existing Django processes..."
+            pkill -f "manage.py runserver" || true
+            pkill -f "gunicorn" || true
+            sleep 5
             
-            echo "Starting Django application..."
-            nohup poetry run python manage.py runserver 0.0.0.0:8000 > /dev/null 2>&1 &
+            echo "Starting Django application with Gunicorn..."
+            poetry run gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
             
             echo "Waiting for application to start..."
-            sleep 10
+            sleep 15
             
             echo "Verifying deployment..."
             if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
               echo "✅ Backend deployed successfully in DEV!"
             else
               echo "❌ Error: Application not responding"
+              echo "Checking if Gunicorn is running..."
+              ps aux | grep gunicorn || true
+              echo "Checking if port 8000 is open..."
+              netstat -tlnp | grep :8000 || true
               exit 1
             fi
             
@@ -120,8 +127,9 @@ jobs:
             echo "Installing Poetry if not present..."
             if ! command -v poetry &> /dev/null; then
               curl -sSL https://install.python-poetry.org | python3 -
-              export PATH="$HOME/.local/bin:$PATH"
             fi
+            # Ensure Poetry is in PATH
+            export PATH="$HOME/.local/bin:$PATH"
             
             echo "Installing dependencies..."
             poetry install --only=main --no-dev
@@ -132,11 +140,13 @@ jobs:
             echo "Collecting static files..."
             poetry run python manage.py collectstatic --noinput
             
-            echo "Stopping existing Django process..."
-            pkill -f "python manage.py runserver" || true
+            echo "Stopping existing Django processes..."
+            pkill -f "manage.py runserver" || true
+            pkill -f "gunicorn" || true
+            sleep 5
             
-            echo "Starting Django application..."
-            nohup poetry run python manage.py runserver 0.0.0.0:8000 > /dev/null 2>&1 &
+            echo "Starting Django application with Gunicorn..."
+            poetry run gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
             
             echo "Waiting for application to start..."
             sleep 15
@@ -146,6 +156,10 @@ jobs:
               echo "✅ Backend deployed successfully in PRODUCTION!"
             else
               echo "❌ Health check failed"
+              echo "Checking if Gunicorn is running..."
+              ps aux | grep gunicorn || true
+              echo "Checking if port 8000 is open..."
+              netstat -tlnp | grep :8000 || true
               exit 1
             fi
             
