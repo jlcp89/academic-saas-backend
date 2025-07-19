@@ -41,29 +41,16 @@ jobs:
             
             cd academic_saas
             
-            echo "🐍 Configurando Python y Poetry..."
-            # Install Poetry if not present
-            if ! command -v poetry &> /dev/null; then
-              echo "Instalando Poetry..."
-              curl -sSL https://install.python-poetry.org | python3 -
-              echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-              source ~/.bashrc
-              export PATH="$HOME/.local/bin:$PATH"
-              
-              # Verify installation
-              if ! command -v poetry &> /dev/null; then
-                echo "Poetry installation failed, trying alternative method..."
-                pip3 install poetry
-                export PATH="$HOME/.local/bin:$PATH"
-              fi
+            echo "🐍 Configurando Python y dependencias..."
+            # Install Python dependencies with pip
+            if [ -f "requirements.txt" ]; then
+              echo "📦 Instalando dependencias desde requirements.txt..."
+              pip3 install -r requirements.txt
+            else
+              echo "❌ Error: requirements.txt no encontrado"
+              ls -la
+              exit 1
             fi
-            
-            # Ensure Poetry is in PATH
-            export PATH="$HOME/.local/bin:$PATH"
-            poetry --version
-            
-            echo "📦 Instalando dependencias..."
-            poetry install --only=main --no-dev
             
             echo "🛑 Deteniendo servicio existente..."
             sudo pkill -f "python.*manage.py.*runserver" || true
@@ -84,13 +71,13 @@ jobs:
             EOF
             
             echo "🔄 Ejecutando migraciones..."
-            poetry run python manage.py migrate
+            python3 manage.py migrate
             
             echo "📁 Recolectando archivos estáticos..."
-            poetry run python manage.py collectstatic --noinput
+            python3 manage.py collectstatic --noinput
             
             echo "🚀 Iniciando servidor Django..."
-            nohup poetry run gunicorn --bind 0.0.0.0:8000 --workers 2 --daemon --pid /tmp/django.pid core.wsgi:application
+            nohup python3 -m gunicorn --bind 0.0.0.0:8000 --workers 2 --daemon --pid /tmp/django.pid core.wsgi:application
             
             echo "⏳ Esperando que el servicio esté listo..."
             sleep 15
