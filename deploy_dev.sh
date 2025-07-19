@@ -114,9 +114,9 @@ log_info "Configurando base de datos PostgreSQL..."
 
 # Crear usuario y base de datos PostgreSQL
 sudo -u postgres psql << 'EOF'
-CREATE USER academic_saas_dev WITH PASSWORD 'dev_password_123';
-CREATE DATABASE academic_saas_dev OWNER academic_saas_dev;
-GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO academic_saas_dev;
+CREATE USER admin WITH PASSWORD 'admin123';
+CREATE DATABASE academic_saas_dev OWNER admin;
+GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO admin;
 \q
 EOF
 
@@ -125,7 +125,7 @@ log_info "Configurando variables de entorno..."
 cat > .env << 'EOF'
 SECRET_KEY=django-production-key-52.20.22.173-change-in-real-production
 DEBUG=False
-DATABASE_URL=postgresql://academic_saas_dev:dev_password_123@localhost:5432/academic_saas_dev
+DATABASE_URL=postgresql://admin:admin123@localhost:5432/academic_saas_dev
 ALLOWED_HOSTS=localhost,127.0.0.1,52.20.22.173
 CORS_ALLOWED_ORIGINS=http://localhost,http://127.0.0.1,http://52.20.22.173
 EOF

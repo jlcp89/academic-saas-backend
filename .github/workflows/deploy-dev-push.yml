@@ -73,11 +73,11 @@ jobs:
             
             # Create database and user
             sudo -u postgres psql -c "DROP DATABASE IF EXISTS academic_saas_dev;" || true
-            sudo -u postgres psql -c "DROP USER IF EXISTS academic_user;" || true
+            sudo -u postgres psql -c "DROP USER IF EXISTS admin;" || true
             sudo -u postgres psql -c "CREATE DATABASE academic_saas_dev;"
-            sudo -u postgres psql -c "CREATE USER academic_user WITH PASSWORD 'dev_password_123';"
-            sudo -u postgres psql -c "ALTER USER academic_user CREATEDB;"
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO academic_user;"
+            sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'admin123';"
+            sudo -u postgres psql -c "ALTER USER admin CREATEDB;"
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO admin;"
             
             echo "Using Python 3.8..."
             python3.8 --version
@@ -111,7 +111,7 @@ jobs:
             
             cat > .env << EOF
             ENVIRONMENT=dev
-            DATABASE_URL=postgresql://academic_user:dev_password_123@localhost:5432/academic_saas_dev
+            DATABASE_URL=postgresql://admin:admin123@localhost:5432/academic_saas_dev
             SECRET_KEY=$SECRET_KEY_VALUE
             DEBUG=True
             ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
@@ -127,7 +127,7 @@ jobs:
             
             # Export variables to environment as well
             export ENVIRONMENT=dev
-            export DATABASE_URL="postgresql://academic_user:dev_password_123@localhost:5432/academic_saas_dev"
+            export DATABASE_URL="postgresql://admin:admin123@localhost:5432/academic_saas_dev"
             export SECRET_KEY="$SECRET_KEY_VALUE"
             export DEBUG=True
             export ALLOWED_HOSTS="localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
@@ -139,6 +139,24 @@ jobs:
             
             echo "🔄 Ejecutando migraciones..."
             python3.8 manage.py migrate || { echo "Migration failed"; exit 1; }
+            
+            echo "👤 Creando superusuario Django..."
+            python3.8 manage.py shell << 'EOF'
+            from apps.users.models import User
+            from apps.organizations.models import School
+            
+            if not User.objects.filter(username='admin').exists():
+                # Crear escuela demo si no existe
+                school, created = School.objects.get_or_create(name='Demo School')
+                if created:
+                    print("Escuela demo creada")
+                
+                # Crear superusuario
+                User.objects.create_superuser('admin', 'admin@example.com', 'admin123', school=school)
+                print("Superusuario creado: admin / admin123")
+            else:
+                print("Superusuario ya existe: admin / admin123")
+            EOF
             
             echo "📁 Recolectando archivos estáticos..."
             python3.8 manage.py collectstatic --noinput || { echo "Collectstatic failed"; exit 1; }
