@@ -150,19 +150,24 @@ jobs:
             sleep 10
             
             echo "🌐 Configurando Nginx..."
-            # Install nginx if not present
+            # Install nginx if not present (Amazon Linux 2 specific)
             if ! command -v nginx &> /dev/null; then
-              sudo yum install -y nginx
+              echo "Installing nginx via amazon-linux-extras..."
+              sudo amazon-linux-extras install -y nginx1
             fi
             
-            # Stop nginx
+            # Stop nginx if running
             sudo systemctl stop nginx || true
+            
+            # Create nginx directories if they don't exist
+            sudo mkdir -p /etc/nginx
+            sudo mkdir -p /var/log/nginx
             
             # Copy nginx configuration
             sudo cp nginx.conf /etc/nginx/nginx.conf
             
             # Test nginx configuration
-            sudo nginx -t || { echo "Nginx config test failed"; exit 1; }
+            sudo nginx -t || { echo "Nginx config test failed"; cat /var/log/nginx/error.log || true; exit 1; }
             
             # Start nginx
             sudo systemctl enable nginx
