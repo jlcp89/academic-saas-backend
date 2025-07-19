@@ -93,6 +93,23 @@ jobs:
             
             echo "✅ Variables de entorno configuradas"
             
+            # Debug: Check if .env file was created correctly
+            echo "🔍 Verificando archivo .env:"
+            cat .env
+            echo "---"
+            
+            # Export variables to environment as well
+            export ENVIRONMENT=dev
+            export DATABASE_URL="sqlite:///db.sqlite3"
+            export SECRET_KEY="$SECRET_KEY_VALUE"
+            export DEBUG=True
+            export ALLOWED_HOSTS="localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
+            export CORS_ALLOWED_ORIGINS="http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}"
+            
+            echo "🔍 Verificando variables de entorno:"
+            echo "SECRET_KEY length: ${#SECRET_KEY}"
+            echo "DATABASE_URL: $DATABASE_URL"
+            
             echo "🔄 Ejecutando migraciones..."
             python3.8 manage.py migrate || { echo "Migration failed"; exit 1; }
             
