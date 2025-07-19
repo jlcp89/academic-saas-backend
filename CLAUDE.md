@@ -6,47 +6,69 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Environment Setup
 ```bash
-# Activate virtual environment
-source academic_saas_env/bin/activate
+# Install dependencies with Poetry
+poetry install
 
-# Install dependencies
-pip install -r requirements.txt
+# Activate Poetry virtual environment
+poetry shell
+
+# Or run commands with Poetry
+poetry run python manage.py [command]
 ```
 
 ### Running the Application
 ```bash
-# Quick start with automated setup
-./run_app.sh
+# Local development with PostgreSQL and Nginx
+../run_local.sh
 
-# Manual start
-python manage.py runserver 0.0.0.0:8000
+# Manual start with Poetry
+poetry run python manage.py runserver 0.0.0.0:8000
 ```
 
 ### Database Management
 ```bash
 # Create migrations after model changes
-python manage.py makemigrations
+poetry run python manage.py makemigrations
 
 # Apply migrations
-python manage.py migrate
+poetry run python manage.py migrate
 
 # Create superuser
-python manage.py createsuperuser
+poetry run python manage.py createsuperuser
 ```
+
+### Database Configuration
+- **Local Environment**: PostgreSQL database `academic_saas_local` with user `academic_saas_local`
+- **Dev Environment**: PostgreSQL database `academic_saas_dev` with user `academic_saas_dev`  
+- **Production**: Configurable via `DATABASE_URL` environment variable
+
+### Dependency Management Strategy
+**Poetry ensures exact version consistency across all environments:**
+
+- **pyproject.toml**: Defines dependency ranges and project metadata
+- **poetry.lock**: Locks exact versions (commit this file to git)
+- **Local**: Uses `poetry install` (includes dev dependencies for testing)
+- **Dev/Prod**: Uses `poetry install --only=main --no-dev` (production only)
+
+**Key Benefits:**
+- Identical package versions between local, dev, and production
+- Deterministic builds and deployments
+- Easier debugging (same environment everywhere)
+- Dependency vulnerability tracking
 
 ### Testing
 ```bash
 # Run all tests
-python manage.py test
+poetry run python manage.py test
 
 # Run tests for specific app
-python manage.py test apps.users
+poetry run python manage.py test apps.users
 ```
 
 ### Django Shell
 ```bash
 # Access Django shell for debugging/data manipulation
-python manage.py shell
+poetry run python manage.py shell
 ```
 
 ## Architecture Overview
@@ -108,7 +130,8 @@ This is a Django REST Framework-based multi-tenant academic management system wh
 **Environment Configuration**:
 - Uses python-decouple for environment variables
 - Database URL configurable via DATABASE_URL
-- Supports both SQLite (dev) and PostgreSQL (production)
+- PostgreSQL for all environments (local, dev, production)
+- Poetry for dependency management
 - Optional AWS S3 storage for media files
 
 ### Default Credentials
@@ -234,21 +257,20 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ### Development Workflow
 
-1. **Start Both Servers**:
+1. **Start Both Servers with Nginx**:
    ```bash
-   # Terminal 1: Backend (Django)
-   cd academic_saas
-   ./run_app.sh
-
-   # Terminal 2: Frontend (Next.js)
-   cd academic-saas-frontend
-   npm run dev
+   # Single command from project root
+   ./run_local.sh
    ```
 
-2. **Access Points**:
+2. **Access Points (via Nginx reverse proxy)**:
+   - Application: http://localhost
+   - Backend API: http://localhost/api/
+   - Django Admin: http://localhost/admin/
+   
+3. **Direct Access (development only)**:
    - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000
-   - Django Admin: http://localhost:8000/admin/
+   - Backend: http://localhost:8000
    - API Docs: http://localhost:8000/api/docs/
 
 3. **Default Login**: `admin / admin123`
