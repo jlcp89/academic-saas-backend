@@ -84,7 +84,39 @@ jobs:
             
             # Install Python dependencies (skip if already installed recently)
             echo "📦 Instalando dependencias..."
+            
+            # Install PostgreSQL development headers for psycopg2
+            sudo yum install -y postgresql-devel gcc python3-devel
+            
             python3.8 -m pip install -r requirements.txt --quiet
+            
+            # Verify critical dependencies
+            echo "🔍 Verifying critical dependencies..."
+            python3.8 -c "
+            import sys
+            missing = []
+            try:
+                import django
+                print(f'✅ Django {django.get_version()}')
+            except ImportError:
+                missing.append('django')
+                
+            try:
+                import psycopg2
+                print('✅ psycopg2')
+            except ImportError:
+                missing.append('psycopg2')
+                
+            try:
+                import gunicorn
+                print('✅ gunicorn')
+            except ImportError:
+                missing.append('gunicorn')
+                
+            if missing:
+                print(f'❌ Missing: {missing}')
+                sys.exit(1)
+            "
             
             echo "🛑 Verificando y deteniendo servicios existentes..."
             # Check if Django is running and stop it gracefully
@@ -180,6 +212,37 @@ jobs:
             echo "🚀 Iniciando servidor Django..."
             # First test if Django can start at all
             echo "Testing Django startup..."
+            
+            echo "🔍 Checking Python environment..."
+            python3.8 --version
+            python3.8 -c "import django; print(f'Django version: {django.get_version()}')"
+            
+            echo "🔍 Testing database adapter..."
+            python3.8 -c "
+            try:
+                import psycopg2
+                print('✅ psycopg2 available')
+            except ImportError:
+                print('❌ psycopg2 not available, trying psycopg2-binary')
+                try:
+                    import psycopg2
+                    print('✅ psycopg2-binary available')
+                except ImportError:
+                    print('❌ No PostgreSQL adapter available')
+            "
+            
+            echo "🔍 Testing WSGI module..."
+            python3.8 -c "
+            import os
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+            try:
+                from core.wsgi import application
+                print('✅ WSGI module loads successfully')
+            except Exception as e:
+                print(f'❌ WSGI module failed: {e}')
+                exit(1)
+            "
+            
             python3.8 manage.py check || { 
               echo "❌ Django check failed"
               python3.8 manage.py check --deploy || true
@@ -198,10 +261,25 @@ jobs:
                 echo "✅ Django process is running"
               else
                 echo "❌ Django process not found, checking logs:"
-                tail -n 20 /tmp/django.log || echo "No logs available"
+                tail -n 30 /tmp/django.log || echo "No logs available"
+                echo "❌ Django process died, this indicates a startup error"
               fi
             else
               echo "❌ Django PID file not created"
+              echo "Checking if gunicorn started at all:"
+              tail -n 30 /tmp/django.log || echo "No logs available"
+            fi
+            
+            # Additional Django debugging
+            echo "🔍 Testing Django manually..."
+            timeout 10 python3.8 manage.py runserver 127.0.0.1:8001 --noreload &
+            sleep 3
+            if curl -f http://localhost:8001/admin/login/ > /dev/null 2>&1; then
+              echo "✅ Django can start manually - issue is with gunicorn"
+              kill %1 2>/dev/null || true
+            else
+              echo "❌ Django cannot start even manually - configuration issue"
+              kill %1 2>/dev/null || true
             fi
             
             echo "🌐 Configurando Nginx..."
