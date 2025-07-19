@@ -41,7 +41,7 @@ jobs:
             
             cd academic-saas-backend
             
-            echo "🐍 Configurando Python y dependencias..."
+            echo "🐍 Configurando Python, PostgreSQL y dependencias..."
             
             # Install Python 3.8 if not present
             if ! command -v python3.8 &> /dev/null; then
@@ -51,6 +51,33 @@ jobs:
               sudo amazon-linux-extras enable python3.8
               sudo yum install -y python3.8 python3.8-pip
             fi
+            
+            # Install and configure PostgreSQL
+            echo "Setting up PostgreSQL..."
+            sudo yum install -y postgresql postgresql-server postgresql-devel
+            
+            # Initialize PostgreSQL if not already done
+            if [ ! -f /var/lib/pgsql/data/postgresql.conf ]; then
+              echo "Initializing PostgreSQL..."
+              sudo postgresql-setup initdb
+              
+              # Configure PostgreSQL to accept local connections
+              sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf
+              echo "local all all trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
+              echo "host all all 127.0.0.1/32 trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
+            fi
+            
+            # Start PostgreSQL
+            sudo systemctl enable postgresql
+            sudo systemctl start postgresql
+            
+            # Create database and user
+            sudo -u postgres psql -c "DROP DATABASE IF EXISTS academic_saas_dev;" || true
+            sudo -u postgres psql -c "DROP USER IF EXISTS academic_user;" || true
+            sudo -u postgres psql -c "CREATE DATABASE academic_saas_dev;"
+            sudo -u postgres psql -c "CREATE USER academic_user WITH PASSWORD 'dev_password_123';"
+            sudo -u postgres psql -c "ALTER USER academic_user CREATEDB;"
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO academic_user;"
             
             echo "Using Python 3.8..."
             python3.8 --version
@@ -84,7 +111,7 @@ jobs:
             
             cat > .env << EOF
             ENVIRONMENT=dev
-            DATABASE_URL=sqlite:///db.sqlite3
+            DATABASE_URL=postgresql://academic_user:dev_password_123@localhost:5432/academic_saas_dev
             SECRET_KEY=$SECRET_KEY_VALUE
             DEBUG=True
             ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
@@ -100,7 +127,7 @@ jobs:
             
             # Export variables to environment as well
             export ENVIRONMENT=dev
-            export DATABASE_URL="sqlite:///db.sqlite3"
+            export DATABASE_URL="postgresql://academic_user:dev_password_123@localhost:5432/academic_saas_dev"
             export SECRET_KEY="$SECRET_KEY_VALUE"
             export DEBUG=True
             export ALLOWED_HOSTS="localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
