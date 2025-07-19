@@ -43,30 +43,27 @@ jobs:
             
             echo "🐍 Configurando Python y dependencias..."
             
-            # Install Python 3.8 (Django 4.2.9 requires Python 3.8+)
-            echo "Installing Python 3.8..."
-            sudo yum update -y
-            sudo yum install -y amazon-linux-extras
-            sudo amazon-linux-extras enable python3.8
-            sudo yum install -y python3.8 python3.8-pip
+            # Install Python 3.8 if not present
+            if ! command -v python3.8 &> /dev/null; then
+              echo "Installing Python 3.8..."
+              sudo yum update -y
+              sudo yum install -y amazon-linux-extras
+              sudo amazon-linux-extras enable python3.8
+              sudo yum install -y python3.8 python3.8-pip
+            fi
             
-            # Use Python 3.8 for the rest of the script
             echo "Using Python 3.8..."
             python3.8 --version
             
-            # Install Python dependencies with pip
-            if [ -f "requirements.txt" ]; then
-              echo "📦 Instalando dependencias desde requirements.txt..."
-              python3.8 -m pip install -r requirements.txt
-            else
-              echo "❌ Error: requirements.txt no encontrado"
-              ls -la
-              exit 1
-            fi
+            # Install Python dependencies (skip if already installed recently)
+            echo "📦 Instalando dependencias..."
+            python3.8 -m pip install --no-deps -r requirements.txt || python3.8 -m pip install -r requirements.txt
             
-            echo "🛑 Deteniendo servicio existente..."
-            sudo pkill -f "python.*manage.py.*runserver" || true
-            sudo pkill -f "gunicorn.*core.wsgi" || true
+            echo "🛑 Deteniendo servicios existentes..."
+            # More specific process termination
+            sudo pkill -f "gunicorn.*core.wsgi" || echo "No gunicorn process found"
+            sudo pkill -f "python.*manage.py" || echo "No Django process found"
+            sleep 2
             
             echo "⚙️ Configurando variables de entorno..."
             cat > .env << EOF
@@ -79,29 +76,46 @@ jobs:
             EOF
             
             echo "🔄 Ejecutando migraciones..."
-            python3.8 manage.py migrate
+            python3.8 manage.py migrate || { echo "Migration failed"; exit 1; }
             
             echo "📁 Recolectando archivos estáticos..."
-            python3.8 manage.py collectstatic --noinput
+            python3.8 manage.py collectstatic --noinput || { echo "Collectstatic failed"; exit 1; }
             
             echo "🚀 Iniciando servidor Django..."
-            nohup python3.8 -m gunicorn --bind 0.0.0.0:8000 --workers 2 --daemon --pid /tmp/django.pid core.wsgi:application
+            nohup python3.8 -m gunicorn --bind 0.0.0.0:8000 --workers 2 --pid /tmp/django.pid core.wsgi:application > /tmp/django.log 2>&1 &
             
             echo "⏳ Esperando que el servicio esté listo..."
-            sleep 15
+            sleep 10
+            
+            # Check if process started
+            if [ -f /tmp/django.pid ]; then
+              echo "✅ Django PID file created: $(cat /tmp/django.pid)"
+            else
+              echo "❌ Django PID file not found"
+            fi
             
             echo "🔍 Verificando salud del servicio..."
-            # Verificar que esté funcionando
-            if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-              echo "✅ Backend desplegado exitosamente!"
-              echo "🌐 URL: http://${{ secrets.EC2_HOST_DEV }}:8000"
-              echo "🔧 Admin: http://${{ secrets.EC2_HOST_DEV }}:8000/admin"
-            else
-              echo "❌ Error: El backend no responde"
-              echo "Logs del proceso:"
-              tail -n 50 nohup.out || echo "No hay logs disponibles"
-              exit 1
-            fi
+            # Wait a bit more and check
+            sleep 5
+            
+            # Check if service is responding
+            for i in {1..5}; do
+              if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+                echo "✅ Backend desplegado exitosamente!"
+                echo "🌐 URL: http://${{ secrets.EC2_HOST_DEV }}:8000"
+                echo "🔧 Admin: http://${{ secrets.EC2_HOST_DEV }}:8000/admin"
+                exit 0
+              else
+                echo "Intento $i/5: Esperando respuesta del servidor..."
+                sleep 3
+              fi
+            done
+            
+            echo "❌ Error: El backend no responde después de varios intentos"
+            echo "Logs del proceso:"
+            tail -n 50 /tmp/django.log || echo "No hay logs disponibles en /tmp/django.log"
+            ps aux | grep gunicorn || echo "No hay procesos gunicorn"
+            exit 1
 
       - name: Verify deployment
         run: |
