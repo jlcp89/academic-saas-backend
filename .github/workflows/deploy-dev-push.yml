@@ -144,10 +144,32 @@ jobs:
             python3.8 manage.py collectstatic --noinput || { echo "Collectstatic failed"; exit 1; }
             
             echo "🚀 Iniciando servidor Django..."
-            nohup python3.8 -m gunicorn --bind 0.0.0.0:8000 --workers 2 --pid /tmp/django.pid core.wsgi:application > /tmp/django.log 2>&1 &
+            nohup python3.8 -m gunicorn --bind 127.0.0.1:8000 --workers 2 --pid /tmp/django.pid core.wsgi:application > /tmp/django.log 2>&1 &
             
-            echo "⏳ Esperando que el servicio esté listo..."
+            echo "⏳ Esperando que Django esté listo..."
             sleep 10
+            
+            echo "🌐 Configurando Nginx..."
+            # Install nginx if not present
+            if ! command -v nginx &> /dev/null; then
+              sudo yum install -y nginx
+            fi
+            
+            # Stop nginx
+            sudo systemctl stop nginx || true
+            
+            # Copy nginx configuration
+            sudo cp nginx.conf /etc/nginx/nginx.conf
+            
+            # Test nginx configuration
+            sudo nginx -t || { echo "Nginx config test failed"; exit 1; }
+            
+            # Start nginx
+            sudo systemctl enable nginx
+            sudo systemctl start nginx
+            
+            echo "⏳ Esperando que Nginx esté listo..."
+            sleep 5
             
             # Check if process started
             if [ -f /tmp/django.pid ]; then
@@ -160,12 +182,13 @@ jobs:
             # Wait a bit more and check
             sleep 5
             
-            # Check if service is responding
+            # Check if service is responding through nginx
             for i in {1..5}; do
-              if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-                echo "✅ Backend desplegado exitosamente!"
-                echo "🌐 URL: http://${{ secrets.EC2_HOST_DEV }}:8000"
-                echo "🔧 Admin: http://${{ secrets.EC2_HOST_DEV }}:8000/admin"
+              if curl -f http://localhost/admin/login/ > /dev/null 2>&1; then
+                echo "✅ Backend con Nginx desplegado exitosamente!"
+                echo "🌐 URL: http://${{ secrets.EC2_HOST_DEV }}"
+                echo "🔧 Admin: http://${{ secrets.EC2_HOST_DEV }}/admin"
+                echo "📚 API Docs: http://${{ secrets.EC2_HOST_DEV }}/api/docs/"
                 exit 0
               else
                 echo "Intento $i/5: Esperando respuesta del servidor..."
@@ -181,10 +204,10 @@ jobs:
 
       - name: Verify deployment
         run: |
-          echo "🔍 Verificando despliegue del backend..."
+          echo "🔍 Verificando despliegue del backend con Nginx..."
           sleep 10
-          curl -f http://${{ secrets.EC2_HOST_DEV }}:8000/admin/login/ || exit 1
-          echo "✅ Verificación del backend completada exitosamente!"
+          curl -f http://${{ secrets.EC2_HOST_DEV }}/admin/login/ || exit 1
+          echo "✅ Verificación del backend con Nginx completada exitosamente!"
 
       - name: Notify deployment status
         if: always()
