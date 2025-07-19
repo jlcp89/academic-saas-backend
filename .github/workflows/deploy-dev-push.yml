@@ -138,7 +138,23 @@ jobs:
             echo "DATABASE_URL: $DATABASE_URL"
             
             echo "🔄 Ejecutando migraciones..."
-            python3.8 manage.py migrate || { echo "Migration failed"; exit 1; }
+            python3.8 manage.py migrate || { 
+              echo "❌ Migration failed, checking database connection:"
+              python3.8 -c "
+              import os
+              os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+              import django
+              django.setup()
+              from django.db import connection
+              try:
+                  cursor = connection.cursor()
+                  cursor.execute('SELECT 1')
+                  print('✅ Database connection successful')
+              except Exception as e:
+                  print(f'❌ Database connection failed: {e}')
+              "
+              exit 1; 
+            }
             
             echo "👤 Creando superusuario Django..."
             python3.8 manage.py shell << 'EOF'
@@ -162,7 +178,15 @@ jobs:
             python3.8 manage.py collectstatic --noinput || { echo "Collectstatic failed"; exit 1; }
             
             echo "🚀 Iniciando servidor Django..."
-            nohup python3.8 -m gunicorn --bind 127.0.0.1:8000 --workers 2 --pid /tmp/django.pid core.wsgi:application > /tmp/django.log 2>&1 &
+            # First test if Django can start at all
+            echo "Testing Django startup..."
+            python3.8 manage.py check || { 
+              echo "❌ Django check failed"
+              python3.8 manage.py check --deploy || true
+              exit 1
+            }
+            
+            nohup python3.8 -m gunicorn --bind 127.0.0.1:8000 --workers 2 --pid /tmp/django.pid --log-level debug core.wsgi:application > /tmp/django.log 2>&1 &
             
             echo "⏳ Esperando que Django esté listo..."
             sleep 15
@@ -194,11 +218,21 @@ jobs:
             sudo mkdir -p /etc/nginx
             sudo mkdir -p /var/log/nginx
             
+            # Remove any conflicting configurations
+            sudo rm -f /etc/nginx/conf.d/academic-saas-frontend.conf || true
+            sudo rm -f /etc/nginx/conf.d/default.conf || true
+            
             # Copy nginx configuration
             sudo cp nginx.conf /etc/nginx/nginx.conf
             
             # Test nginx configuration
             sudo nginx -t || { echo "Nginx config test failed"; cat /var/log/nginx/error.log || true; exit 1; }
+            
+            # Only start nginx if Django is running
+            if ! curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+              echo "❌ Django not responding, not starting nginx"
+              exit 1
+            fi
             
             # Start nginx
             sudo systemctl enable nginx
