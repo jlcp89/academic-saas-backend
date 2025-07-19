@@ -118,61 +118,17 @@ jobs:
                 sys.exit(1)
             "
             
-            echo "🛑 Verificando y deteniendo servicios existentes..."
+            echo "🛑 Limpieza simple de procesos existentes..."
             
-            # Temporarily disable exit on error for cleanup section
-            set +e
+            # Simple cleanup - just remove PID file and kill by port
+            rm -f /tmp/django.pid || true
             
-            # Check if Django is running and stop it gracefully
-            if [ -f /tmp/django.pid ]; then
-              OLD_PID=$(cat /tmp/django.pid)
-              if ps -p $OLD_PID > /dev/null 2>&1; then
-                echo "Terminando proceso Django PID: $OLD_PID"
-                kill $OLD_PID || true
-                sleep 3
-                # Force kill if still running
-                kill -9 $OLD_PID 2>/dev/null || true
-              fi
-              rm -f /tmp/django.pid
-            fi
+            # Simple port cleanup - kill whatever is on 8000
+            echo "🔍 Limpiando puerto 8000..."
+            fuser -k 8000/tcp 2>/dev/null || true
+            sleep 3
             
-            # Kill any process using port 8000
-            echo "🔍 Verificando procesos en puerto 8000..."
-            PORT_PID=$(lsof -t -i:8000 2>/dev/null || true)
-            if [ ! -z "$PORT_PID" ]; then
-              echo "Encontrado proceso en puerto 8000: $PORT_PID"
-              kill $PORT_PID || true
-              sleep 2
-              # Force kill if still running
-              if kill -0 $PORT_PID 2>/dev/null; then
-                echo "Forzando terminación del proceso $PORT_PID"
-                kill -9 $PORT_PID 2>/dev/null || true
-              fi
-            else
-              echo "✅ Puerto 8000 libre"
-            fi
-            
-            # Kill any remaining gunicorn processes
-            echo "🔍 Limpiando procesos gunicorn..."
-            if pgrep -f "gunicorn.*core.wsgi" >/dev/null 2>&1; then
-              echo "Encontrados procesos gunicorn, terminándolos..."
-              pkill -f "gunicorn.*core.wsgi" || true
-              sleep 2
-            else
-              echo "✅ No hay procesos gunicorn ejecutándose"
-            fi
-            
-            # Verify port is free
-            if lsof -t -i:8000 >/dev/null 2>&1; then
-              echo "❌ Puerto 8000 todavía ocupado, forzando limpieza"
-              lsof -t -i:8000 | xargs kill -9 2>/dev/null || true
-              sleep 2
-            fi
-            
-            echo "✅ Limpieza de procesos completada"
-            
-            # Re-enable exit on error after cleanup
-            set -e
+            echo "✅ Limpieza completada"
             
             echo "⚙️ Configurando variables de entorno..."
             
@@ -291,15 +247,9 @@ jobs:
               exit 1
             }
             
-            # Final verification that port 8000 is free
+            # Simple port verification
             echo "🔍 Verificación final del puerto 8000..."
-            if lsof -t -i:8000 >/dev/null 2>&1; then
-              echo "❌ ADVERTENCIA: Puerto 8000 todavía ocupado!"
-              lsof -i:8000
-              echo "Intentando limpieza final..."
-              lsof -t -i:8000 | xargs kill -9 2>/dev/null || true
-              sleep 3
-            fi
+            sleep 2
             
             echo "🚀 Iniciando gunicorn en puerto 8000..."
             nohup python3.8 -m gunicorn --bind 127.0.0.1:8000 --workers 2 --pid /tmp/django.pid --log-level debug core.wsgi:application > /tmp/django.log 2>&1 &
