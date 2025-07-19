@@ -44,9 +44,23 @@ jobs:
             echo "🐍 Configurando Python y Poetry..."
             # Install Poetry if not present
             if ! command -v poetry &> /dev/null; then
+              echo "Instalando Poetry..."
               curl -sSL https://install.python-poetry.org | python3 -
+              echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+              source ~/.bashrc
               export PATH="$HOME/.local/bin:$PATH"
+              
+              # Verify installation
+              if ! command -v poetry &> /dev/null; then
+                echo "Poetry installation failed, trying alternative method..."
+                pip3 install poetry
+                export PATH="$HOME/.local/bin:$PATH"
+              fi
             fi
+            
+            # Ensure Poetry is in PATH
+            export PATH="$HOME/.local/bin:$PATH"
+            poetry --version
             
             echo "📦 Instalando dependencias..."
             poetry install --only=main --no-dev
