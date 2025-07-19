@@ -34,12 +34,12 @@ jobs:
             
             cd /home/ec2-user
             echo "🧹 Limpiando despliegue anterior..."
-            sudo rm -rf academic_saas
+            sudo rm -rf academic-saas-backend
             
             echo "📥 Clonando repositorio backend..."
-            git clone --depth 1 --branch dev https://github.com/jlcp89/academic_saas.git academic_saas
+            git clone --depth 1 --branch dev https://github.com/jlcp89/academic-saas-backend.git academic-saas-backend
             
-            cd academic_saas
+            cd academic-saas-backend
             
             echo "🐍 Configurando Python y dependencias..."
             # Install Python dependencies with pip
