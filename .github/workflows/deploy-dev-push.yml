@@ -41,7 +41,7 @@ jobs:
             
             cd academic-saas-backend
             
-            echo "🐍 Configurando Python, PostgreSQL y dependencias..."
+            echo "🐍 Configurando Python y dependencias..."
             
             # Install Python 3.8 (Django 4.2.9 requires Python 3.8+)
             echo "Installing Python 3.8..."
@@ -49,25 +49,6 @@ jobs:
             sudo yum install -y amazon-linux-extras
             sudo amazon-linux-extras enable python3.8
             sudo yum install -y python3.8 python3.8-pip
-            
-            # Install and configure PostgreSQL
-            echo "Installing PostgreSQL..."
-            sudo yum install -y postgresql postgresql-server postgresql-devel
-            
-            # Initialize PostgreSQL if not already done
-            if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
-              sudo postgresql-setup initdb
-              sudo systemctl enable postgresql
-              sudo systemctl start postgresql
-              
-              # Create database and user
-              sudo -u postgres psql -c "CREATE DATABASE academic_saas_dev;"
-              sudo -u postgres psql -c "CREATE USER academic_user WITH PASSWORD 'dev_password_123';"
-              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO academic_user;"
-              sudo -u postgres psql -c "ALTER USER academic_user CREATEDB;"
-            else
-              sudo systemctl start postgresql
-            fi
             
             # Use Python 3.8 for the rest of the script
             echo "Using Python 3.8..."
@@ -90,12 +71,8 @@ jobs:
             echo "⚙️ Configurando variables de entorno..."
             cat > .env << EOF
             ENVIRONMENT=dev
-            DATABASE_URL=postgresql://academic_user:dev_password_123@localhost:5432/academic_saas_dev
-            REDIS_URL=${{ secrets.REDIS_URL_DEV }}
+            DATABASE_URL=sqlite:///db.sqlite3
             SECRET_KEY=${{ secrets.SECRET_KEY_DEV }}
-            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
-            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME_DEV }}
             DEBUG=True
             ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
             CORS_ALLOWED_ORIGINS=http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}
