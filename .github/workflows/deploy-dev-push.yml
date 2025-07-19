@@ -34,22 +34,30 @@ jobs:
             
             cd /home/ec2-user
             echo "🧹 Limpiando despliegue anterior..."
-            sudo rm -rf academic-saas-backend
+            sudo rm -rf academic_saas
             
             echo "📥 Clonando repositorio backend..."
-            git clone --depth 1 --branch dev https://github.com/jlcp89/academic-saas-backend.git academic-saas-backend
+            git clone --depth 1 --branch dev https://github.com/jlcp89/academic_saas.git academic_saas
             
-            cd academic-saas-backend
+            cd academic_saas
             
-            echo "🐳 Construyendo imagen Docker..."
-            sudo docker build -t academic-saas-backend:dev .
+            echo "🐍 Configurando Python y Poetry..."
+            # Install Poetry if not present
+            if ! command -v poetry &> /dev/null; then
+              curl -sSL https://install.python-poetry.org | python3 -
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
             
-            echo "🛑 Deteniendo contenedores existentes..."
-            sudo docker-compose -f docker-compose.dev.yml down || true
+            echo "📦 Instalando dependencias..."
+            poetry install --only=main --no-dev
             
-            # Crear archivo .env para docker-compose
+            echo "🛑 Deteniendo servicio existente..."
+            sudo pkill -f "python.*manage.py.*runserver" || true
+            sudo pkill -f "gunicorn.*core.wsgi" || true
+            
             echo "⚙️ Configurando variables de entorno..."
             cat > .env << EOF
+            ENVIRONMENT=dev
             DATABASE_URL=${{ secrets.DATABASE_URL_DEV }}
             REDIS_URL=${{ secrets.REDIS_URL_DEV }}
             SECRET_KEY=${{ secrets.SECRET_KEY_DEV }}
@@ -58,23 +66,22 @@ jobs:
             AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME_DEV }}
             DEBUG=True
             ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
+            CORS_ALLOWED_ORIGINS=http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}
             EOF
             
-            echo "🚀 Iniciando servicios..."
-            sudo docker-compose -f docker-compose.dev.yml up -d
-            
-            echo "⏳ Esperando que los servicios estén listos..."
-            sleep 30
-            
             echo "🔄 Ejecutando migraciones..."
-            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py migrate
+            poetry run python manage.py migrate
             
             echo "📁 Recolectando archivos estáticos..."
-            sudo docker-compose -f docker-compose.dev.yml exec -T web python manage.py collectstatic --noinput
+            poetry run python manage.py collectstatic --noinput
+            
+            echo "🚀 Iniciando servidor Django..."
+            nohup poetry run gunicorn --bind 0.0.0.0:8000 --workers 2 --daemon --pid /tmp/django.pid core.wsgi:application
+            
+            echo "⏳ Esperando que el servicio esté listo..."
+            sleep 15
             
             echo "🔍 Verificando salud del servicio..."
-            sleep 10
-            
             # Verificar que esté funcionando
             if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
               echo "✅ Backend desplegado exitosamente!"
@@ -82,7 +89,8 @@ jobs:
               echo "🔧 Admin: http://${{ secrets.EC2_HOST_DEV }}:8000/admin"
             else
               echo "❌ Error: El backend no responde"
-              sudo docker-compose -f docker-compose.dev.yml logs
+              echo "Logs del proceso:"
+              tail -n 50 nohup.out || echo "No hay logs disponibles"
               exit 1
             fi
 
