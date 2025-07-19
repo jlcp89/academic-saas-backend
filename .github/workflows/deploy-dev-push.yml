@@ -74,14 +74,24 @@ jobs:
             fi
             
             echo "⚙️ Configurando variables de entorno..."
+            
+            # Generate a fallback SECRET_KEY if the secret is empty
+            SECRET_KEY_VALUE="${{ secrets.SECRET_KEY_DEV }}"
+            if [ -z "$SECRET_KEY_VALUE" ]; then
+              echo "⚠️ SECRET_KEY_DEV not configured, generating temporary key"
+              SECRET_KEY_VALUE="dev-temp-key-$(date +%s)-$(openssl rand -hex 32)"
+            fi
+            
             cat > .env << EOF
             ENVIRONMENT=dev
             DATABASE_URL=sqlite:///db.sqlite3
-            SECRET_KEY=${{ secrets.SECRET_KEY_DEV }}
+            SECRET_KEY=$SECRET_KEY_VALUE
             DEBUG=True
             ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
             CORS_ALLOWED_ORIGINS=http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}
             EOF
+            
+            echo "✅ Variables de entorno configuradas"
             
             echo "🔄 Ejecutando migraciones..."
             python3.8 manage.py migrate || { echo "Migration failed"; exit 1; }
