@@ -169,15 +169,28 @@ jobs:
                 sys.exit(1)
             "
             
-            echo "🛑 Limpieza simple de procesos existentes..."
+            echo "🛑 Limpieza completa de procesos existentes..."
             
-            # Simple cleanup - just remove PID file and kill by port
-            rm -f /tmp/django.pid || true
+            # Stop existing systemd service first
+            sudo systemctl stop academic-backend || true
+            sudo systemctl disable academic-backend || true
             
-            # Simple port cleanup - kill whatever is on 8000
+            # Remove existing service file to avoid conflicts
+            sudo rm -f /etc/systemd/system/academic-backend.service || true
+            sudo systemctl daemon-reload
+            
+            # Kill any remaining processes on port 8000
             echo "🔍 Limpiando puerto 8000..."
-            fuser -k 8000/tcp 2>/dev/null || true
-            sleep 3
+            sudo pkill -f "gunicorn.*8000" || true
+            sudo fuser -k 8000/tcp 2>/dev/null || true
+            sleep 5
+            
+            # Double check port is free
+            if sudo lsof -ti:8000 >/dev/null 2>&1; then
+              echo "⚠️ Puerto 8000 aún ocupado, forzando limpieza..."
+              sudo kill -9 $(sudo lsof -ti:8000) 2>/dev/null || true
+              sleep 2
+            fi
             
             echo "✅ Limpieza completada"
             
@@ -260,9 +273,6 @@ jobs:
             
             echo "🚀 Configurando systemd service para Django..."
             
-            # Stop any existing backend service
-            sudo systemctl stop academic-backend || true
-            
             # Test Django configuration first
             echo "🔍 Verificando configuración de Django..."
             $PYTHON_CMD manage.py check || { 
@@ -271,12 +281,25 @@ jobs:
               exit 1
             }
             
-            # Get absolute path for Python
+            # Get absolute path for Python and verify
             PYTHON_PATH=$(which $PYTHON_CMD)
             echo "Using Python at: $PYTHON_PATH"
+            if [ ! -f "$PYTHON_PATH" ]; then
+              echo "❌ Python path not found: $PYTHON_PATH"
+              exit 1
+            fi
+            
+            # Verify gunicorn is available
+            if ! $PYTHON_PATH -m gunicorn --version >/dev/null 2>&1; then
+              echo "❌ Gunicorn not available with $PYTHON_PATH"
+              exit 1
+            fi
+            
+            echo "✅ Python and Gunicorn verified"
+            echo "📝 Creating systemd service file..."
             
             # Create systemd service for backend
-            sudo tee /etc/systemd/system/academic-backend.service > /dev/null <<EOF
+            sudo tee /etc/systemd/system/academic-backend.service <<EOF
             [Unit]
             Description=Academic SaaS Backend
             After=network.target postgresql.service
@@ -301,6 +324,17 @@ jobs:
             [Install]
             WantedBy=multi-user.target
             EOF
+            
+            # Verify service file was created correctly
+            echo "🔍 Verificando archivo de servicio..."
+            if [ ! -f /etc/systemd/system/academic-backend.service ]; then
+              echo "❌ Service file not created"
+              exit 1
+            fi
+            
+            # Check service file syntax
+            echo "📋 Contenido del archivo de servicio:"
+            cat /etc/systemd/system/academic-backend.service
             
             # Start backend service
             echo "🚀 Iniciando servicio backend..."
