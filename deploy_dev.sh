@@ -127,7 +127,9 @@ SECRET_KEY=django-production-key-52.20.22.173-change-in-real-production
 DEBUG=False
 DATABASE_URL=postgresql://admin:admin123@localhost:5432/academic_saas_dev
 ALLOWED_HOSTS=localhost,127.0.0.1,52.20.22.173
-CORS_ALLOWED_ORIGINS=http://localhost,http://127.0.0.1,http://52.20.22.173
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://52.20.22.173,http://52.20.22.173:3000
+CORS_ALLOW_CREDENTIALS=True
+CORS_ALLOW_ALL_ORIGINS=False
 EOF
 
 # Ejecutar migraciones con Poetry

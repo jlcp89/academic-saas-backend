@@ -193,10 +193,16 @@ SIMPLE_JWT = {
 }
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = [
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=lambda v: [s.strip() for s in v.split(',')], default=[
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-]
+    "http://52.20.22.173",
+    "http://52.20.22.173:3000",
+])
+
+# Additional CORS settings for development
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', cast=bool, default=False)
 
 # DRF Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
