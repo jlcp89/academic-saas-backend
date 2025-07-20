@@ -271,6 +271,10 @@ jobs:
               exit 1
             }
             
+            # Get absolute path for Python
+            PYTHON_PATH=$(which $PYTHON_CMD)
+            echo "Using Python at: $PYTHON_PATH"
+            
             # Create systemd service for backend
             sudo tee /etc/systemd/system/academic-backend.service > /dev/null <<EOF
             [Unit]
@@ -288,11 +292,11 @@ jobs:
             Environment="DEBUG=True"
             Environment="ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
             Environment="CORS_ALLOWED_ORIGINS=http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}"
-            ExecStart=$PYTHON_CMD -m gunicorn --bind 127.0.0.1:8000 --workers 2 core.wsgi:application
+            ExecStart=$PYTHON_PATH -m gunicorn --bind 127.0.0.1:8000 --workers 2 core.wsgi:application
             Restart=always
             RestartSec=10
-            StandardOutput=append:/home/ec2-user/academic-saas-backend/backend.log
-            StandardError=append:/home/ec2-user/academic-saas-backend/backend-error.log
+            StandardOutput=journal
+            StandardError=journal
             
             [Install]
             WantedBy=multi-user.target
