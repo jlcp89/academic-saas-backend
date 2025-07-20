@@ -611,6 +611,69 @@ curl -H "Origin: http://52.20.22.173" \
 
 ### Recent Fixes Applied (July 2024)
 
+#### **Critical Authentication Fix (July 20, 2025)**
+
+**Problem Resolved**: Complete authentication failure due to hardcoded ALB URLs in frontend build
+
+**Root Cause**: GitHub Actions workflow was building frontend with old ALB URLs instead of correct backend endpoints, causing all authentication requests to fail.
+
+**Critical Fixes Applied**:
+
+1. **SSH Connection Issues** - Fixed "Too many authentication failures":
+   ```bash
+   # Always use specific SSH key to avoid authentication failures
+   ssh -o IdentitiesOnly=yes -i ~/.ssh/academic-saas-github-actions ec2-user@52.20.22.173
+   ```
+
+2. **Backend Service Configuration** - Fixed systemd service binding:
+   - **Issue**: Backend bound to `127.0.0.1:8000` (localhost only)
+   - **Fix**: Updated systemd service to bind to `0.0.0.0:8000` (all interfaces)
+   - **File**: `/etc/systemd/system/academic-backend.service`
+
+3. **GitHub Actions Workflow** - Fixed environment variables in `.github/workflows/deploy.yml`:
+   ```yaml
+   # Lines 69-71: Build application step
+   env:
+     NEXT_PUBLIC_API_URL: http://52.20.22.173:8000
+     NEXTAUTH_URL: http://52.20.22.173:3000
+     NEXTAUTH_SECRET: /bG5bl9y23JSqYstIc/c+uoY/3eIwlPeInJU9kiJd7I=
+   
+   # Lines 139-141: Systemd service environment
+   Environment="NEXT_PUBLIC_API_URL=http://52.20.22.173:8000"
+   Environment="NEXTAUTH_URL=http://52.20.22.173:3000"
+   Environment="NEXTAUTH_SECRET=/bG5bl9y23JSqYstIc/c+uoY/3eIwlPeInJU9kiJd7I="
+   ```
+
+4. **Frontend Deployment Script** - Updated `deploy_dev.sh`:
+   ```bash
+   # Lines 96-98: Correct environment variables
+   NEXT_PUBLIC_API_URL=http://52.20.22.173:8000
+   NEXTAUTH_URL=http://52.20.22.173:3000
+   NEXTAUTH_SECRET=/bG5bl9y23JSqYstIc/c+uoY/3eIwlPeInJU9kiJd7I=
+   ```
+
+5. **Local Environment** - Updated `.env.local`:
+   ```bash
+   NEXT_PUBLIC_API_URL=http://52.20.22.173:8000
+   NEXTAUTH_URL=http://52.20.22.173:3000
+   NEXTAUTH_SECRET=/bG5bl9y23JSqYstIc/c+uoY/3eIwlPeInJU9kiJd7I=
+   NODE_ENV=development
+   ```
+
+**Commits Applied**:
+- `e9ce822` - "fix: Correct API URL configuration for development environment"
+- `89940a8` - "fix: Use correct environment variables for dev deployment"
+
+**Verification Results**:
+- ✅ Backend API: `http://52.20.22.173:8000` - Working
+- ✅ Frontend: `http://52.20.22.173:3000` - Working  
+- ✅ Authentication: admin/admin123 - Working
+- ✅ CORS headers: Configured correctly
+- ✅ Old ALB URLs: Completely removed (0 references)
+- ✅ NextAuth providers: Working
+
+#### **Previous Authentication Fix (July 2024)**
+
 **Problem Resolved**: 401 Unauthorized errors in development environment
 
 **Changes Made**:
@@ -632,26 +695,62 @@ curl -H "Origin: http://52.20.22.173" \
 - Backend: `10b58b4` - "fix: Configurar CORS correctamente para entorno de desarrollo"
 - Frontend: `98d5c2d` - "fix: Corregir URL del API en configuración de desarrollo"
 
-### Prevention Checklist
+### Critical Authentication Prevention Checklist
 
-To avoid authentication issues in future deployments:
+**Essential SSH Connection Rules**:
+- ✅ Always use: `ssh -o IdentitiesOnly=yes -i ~/.ssh/academic-saas-github-actions ec2-user@52.20.22.173`
+- ❌ Never use: `ssh ec2-user@52.20.22.173` (causes authentication failures)
 
-- [ ] Always verify `NEXT_PUBLIC_API_URL` includes correct backend port
-- [ ] Ensure `CORS_ALLOWED_ORIGINS` includes all frontend domains
-- [ ] Test authentication flow after deployment
-- [ ] Check browser Network tab for CORS errors
-- [ ] Verify environment variables in deployment scripts
-- [ ] Test API endpoints directly before frontend integration
+**Deployment Environment Variables (CRITICAL)**:
+- ✅ GitHub Actions workflow must use hardcoded dev URLs (not secrets with ALB URLs)
+- ✅ `NEXT_PUBLIC_API_URL: http://52.20.22.173:8000` (build-time variable)
+- ✅ `NEXTAUTH_URL: http://52.20.22.173:3000` (build-time variable)
+- ✅ Backend systemd service must bind to `0.0.0.0:8000` (not `127.0.0.1:8000`)
 
-1. **Never manually edit environment variables on EC2** - always use GitHub deployment
-2. **Always verify secrets match deployment environment** before troubleshooting
-3. **Run verification script after any deployment** to catch mismatches early
-4. **Frontend requires rebuild** when environment variables change (not just restart)
+**Pre-Deployment Verification**:
+- [ ] Verify GitHub Actions workflow environment variables match actual deployment endpoints
+- [ ] Check `.github/workflows/deploy.yml` lines 69-71 and 139-141 for correct URLs
+- [ ] Ensure `deploy_dev.sh` lines 96-98 have correct environment variables
+- [ ] Verify local `.env.local` matches deployment configuration
 
-### Common Pitfalls
+**Post-Deployment Testing**:
+- [ ] Test backend API directly: `curl -X POST http://52.20.22.173:8000/api/auth/login/`
+- [ ] Test frontend accessibility: `curl http://52.20.22.173:3000/auth/login`
+- [ ] Verify authentication flow with admin/admin123
+- [ ] Check browser Network tab for ALB URLs (should be 0 references)
+- [ ] Confirm NextAuth providers: `curl http://52.20.22.173:3000/api/auth/providers`
 
-- ❌ Changing systemd environment variables manually
-- ❌ Assuming runtime environment variables work for Next.js public variables
+**Critical Rules**:
+1. **NEVER use GitHub repository secrets for dev environment** - hardcode URLs in workflow
+2. **Always verify build contains correct URLs** - old ALB URLs cause complete auth failure
+3. **Frontend requires complete rebuild** when environment variables change (not just restart)
+4. **Always test SSH connection** with correct key before troubleshooting
+5. **Backend service binding** must be `0.0.0.0:8000` for external access
+
+### Common Pitfalls & Solutions
+
+**❌ CRITICAL ERRORS TO AVOID**:
+- ❌ Using GitHub repository secrets for dev environment (causes ALB URL issues)
+- ❌ SSH without `IdentitiesOnly=yes` (causes "Too many authentication failures")
+- ❌ Backend bound to `127.0.0.1:8000` (prevents external access)
+- ❌ Changing systemd environment variables manually on EC2
+- ❌ Assuming runtime environment variables work for Next.js `NEXT_PUBLIC_*` variables
 - ❌ Not rebuilding frontend after environment variable changes
-- ✅ Update GitHub secrets → Deploy → Verify
-- ✅ Use verification script to catch issues early
+- ❌ Testing authentication without verifying build URLs first
+
+**✅ CORRECT APPROACHES**:
+- ✅ Hardcode dev URLs in GitHub Actions workflow (not secrets)
+- ✅ Always use specific SSH key: `ssh -o IdentitiesOnly=yes -i ~/.ssh/academic-saas-github-actions`
+- ✅ Backend systemd service binds to `0.0.0.0:8000`
+- ✅ Update workflow → Deploy → Verify build URLs → Test authentication
+- ✅ Check for ALB URL references in build: `grep -r 'academic-saas-dev' .next/`
+- ✅ Test complete authentication flow after every deployment
+- ✅ Verify environment variables match across all deployment files
+
+**Emergency Authentication Troubleshooting Order**:
+1. Check SSH connection with correct key
+2. Verify backend service binding and accessibility 
+3. Check frontend build for old ALB URLs
+4. Verify GitHub Actions workflow environment variables
+5. Test authentication endpoints directly
+6. Check browser Network tab for failed requests
