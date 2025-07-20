@@ -295,6 +295,70 @@ NEXTAUTH_SECRET=your-secret-key-change-in-production
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
+### CORS and Authentication Configuration
+
+**Important**: The application uses dynamic CORS configuration to support multiple environments.
+
+**Backend CORS Settings** (`core/settings.py`):
+```python
+# CORS settings - Configurable via environment variables
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=lambda v: [s.strip() for s in v.split(',')], default=[
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://52.20.22.173",
+    "http://52.20.22.173:3000",
+])
+
+# Additional CORS settings for development
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', cast=bool, default=False)
+```
+
+**Development Environment CORS Configuration**:
+```bash
+# Backend .env file
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://52.20.22.173,http://52.20.22.173:3000
+CORS_ALLOW_CREDENTIALS=True
+CORS_ALLOW_ALL_ORIGINS=False
+```
+
+**Frontend API URL Configuration**:
+```bash
+# Development
+NEXT_PUBLIC_API_URL=http://52.20.22.173:8000
+
+# Local development  
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+### Common Authentication Issues and Solutions
+
+**Problem**: 401 Unauthorized errors during login in development environment
+
+**Root Causes**:
+1. **Incorrect API URL**: Frontend trying to connect to wrong backend port
+2. **CORS Configuration**: Backend blocking requests from frontend domain
+3. **Missing CORS Headers**: Authentication requests being blocked
+
+**Solutions**:
+1. **Verify API URL**: Ensure `NEXT_PUBLIC_API_URL` points to correct backend port (8000)
+2. **Check CORS Settings**: Verify `CORS_ALLOWED_ORIGINS` includes frontend domain
+3. **Enable Credentials**: Set `CORS_ALLOW_CREDENTIALS=True` for authentication
+4. **Environment Variables**: Ensure proper configuration in deployment scripts
+
+**Debugging Steps**:
+1. Check browser Network tab for CORS errors
+2. Verify backend is running on correct port
+3. Confirm CORS headers in response
+4. Test API endpoints directly with curl/Postman
+
+**Deployment Checklist**:
+- [ ] Backend CORS configured for frontend domain
+- [ ] Frontend API URL points to correct backend port
+- [ ] Environment variables set in deployment scripts
+- [ ] Credentials enabled for authentication
+- [ ] All domains included in CORS_ALLOWED_ORIGINS
+
 ### Development Workflow
 
 1. **Start Both Servers with Nginx**:
@@ -482,6 +546,102 @@ EC2_SSH_KEY = [private-ssh-key-content]
    ```
 
 ### Environment Consistency Rules
+
+## Troubleshooting Authentication Issues
+
+### Common Authentication Problems
+
+**1. 401 Unauthorized on Login**
+- **Symptoms**: Login form shows "Invalid credentials" but credentials are correct
+- **Browser Network Tab**: Shows 401 response from `/api/auth/callback/credentials`
+- **Root Cause**: Usually CORS configuration or incorrect API URL
+
+**2. CORS Errors in Browser Console**
+- **Symptoms**: Browser console shows CORS policy errors
+- **Root Cause**: Backend not configured to allow frontend domain
+- **Solution**: Update `CORS_ALLOWED_ORIGINS` in backend settings
+
+**3. Frontend Can't Connect to Backend**
+- **Symptoms**: Network errors, timeouts, or connection refused
+- **Root Cause**: Incorrect `NEXT_PUBLIC_API_URL` or backend not running
+- **Solution**: Verify backend port (8000) and frontend API URL configuration
+
+### Quick Fix Commands
+
+**Check Backend Status**:
+```bash
+# SSH to development server
+ssh -i ~/.ssh/academic_saas_aws ubuntu@52.20.22.173
+
+# Check backend service
+sudo systemctl status academic-saas-backend
+
+# Check backend logs
+sudo journalctl -u academic-saas-backend -f
+
+# Test backend directly
+curl -X POST http://52.20.22.173:8000/api/auth/login/ \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}'
+```
+
+**Check Frontend Configuration**:
+```bash
+# Check frontend service
+sudo systemctl status academic-frontend
+
+# Check frontend logs
+sudo journalctl -u academic-frontend -f
+
+# Verify environment variables
+cat /home/ec2-user/academic-saas-frontend/.env.local
+```
+
+**Verify CORS Configuration**:
+```bash
+# Check backend CORS settings
+cat /home/ec2-user/academic-saas-backend/.env
+
+# Test CORS headers
+curl -H "Origin: http://52.20.22.173" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: Content-Type" \
+  -X OPTIONS http://52.20.22.173:8000/api/auth/login/
+```
+
+### Recent Fixes Applied (July 2024)
+
+**Problem Resolved**: 401 Unauthorized errors in development environment
+
+**Changes Made**:
+
+1. **Backend CORS Configuration** (`core/settings.py`):
+   - Made `CORS_ALLOWED_ORIGINS` configurable via environment variables
+   - Added support for development server domains
+   - Enabled `CORS_ALLOW_CREDENTIALS` for authentication
+
+2. **Frontend API URL** (`deploy_dev.sh`):
+   - Fixed `NEXT_PUBLIC_API_URL` to include correct backend port (8000)
+   - Changed from `http://52.20.22.173` to `http://52.20.22.173:8000`
+
+3. **Deployment Scripts Updated**:
+   - Backend: Added proper CORS environment variables
+   - Frontend: Corrected API URL configuration
+
+**Commits Applied**:
+- Backend: `10b58b4` - "fix: Configurar CORS correctamente para entorno de desarrollo"
+- Frontend: `98d5c2d` - "fix: Corregir URL del API en configuración de desarrollo"
+
+### Prevention Checklist
+
+To avoid authentication issues in future deployments:
+
+- [ ] Always verify `NEXT_PUBLIC_API_URL` includes correct backend port
+- [ ] Ensure `CORS_ALLOWED_ORIGINS` includes all frontend domains
+- [ ] Test authentication flow after deployment
+- [ ] Check browser Network tab for CORS errors
+- [ ] Verify environment variables in deployment scripts
+- [ ] Test API endpoints directly before frontend integration
 
 1. **Never manually edit environment variables on EC2** - always use GitHub deployment
 2. **Always verify secrets match deployment environment** before troubleshooting
