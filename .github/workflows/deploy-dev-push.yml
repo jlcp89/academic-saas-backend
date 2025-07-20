@@ -118,13 +118,13 @@ jobs:
             sudo systemctl enable $PG_SERVICE
             sudo systemctl start $PG_SERVICE
             
-            # Create database and user
+            # Create database and user with consistent naming
             sudo -u postgres psql -c "DROP DATABASE IF EXISTS academic_saas_dev;" || true
-            sudo -u postgres psql -c "DROP USER IF EXISTS admin;" || true
+            sudo -u postgres psql -c "DROP USER IF EXISTS academic_saas_dev;" || true
             sudo -u postgres psql -c "CREATE DATABASE academic_saas_dev;"
-            sudo -u postgres psql -c "CREATE USER admin WITH PASSWORD 'admin123';"
-            sudo -u postgres psql -c "ALTER USER admin CREATEDB;"
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO admin;"
+            sudo -u postgres psql -c "CREATE USER academic_saas_dev WITH PASSWORD 'dev_password_123';"
+            sudo -u postgres psql -c "ALTER USER academic_saas_dev CREATEDB;"
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO academic_saas_dev;"
             
             echo "Using Python: $PYTHON_CMD"
             $PYTHON_CMD --version
@@ -192,7 +192,7 @@ jobs:
             
             cat > .env << EOF
             ENVIRONMENT=dev
-            DATABASE_URL=postgresql://admin:admin123@localhost:5432/academic_saas_dev
+            DATABASE_URL=postgresql://academic_saas_dev:dev_password_123@localhost:5432/academic_saas_dev
             SECRET_KEY=$SECRET_KEY_VALUE
             DEBUG=True
             ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
@@ -208,7 +208,7 @@ jobs:
             
             # Export variables to environment as well
             export ENVIRONMENT=dev
-            export DATABASE_URL="postgresql://admin:admin123@localhost:5432/academic_saas_dev"
+            export DATABASE_URL="postgresql://academic_saas_dev:dev_password_123@localhost:5432/academic_saas_dev"
             export SECRET_KEY="$SECRET_KEY_VALUE"
             export DEBUG=True
             export ALLOWED_HOSTS="localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
@@ -258,82 +258,74 @@ jobs:
             echo "📁 Recolectando archivos estáticos..."
             $PYTHON_CMD manage.py collectstatic --noinput || { echo "Collectstatic failed"; exit 1; }
             
-            echo "🚀 Iniciando servidor Django..."
-            # First test if Django can start at all
-            echo "Testing Django startup..."
+            echo "🚀 Configurando systemd service para Django..."
             
-            echo "🔍 Checking Python environment..."
-            $PYTHON_CMD --version
-            $PYTHON_CMD -c "import django; print(f'Django version: {django.get_version()}')"
+            # Stop any existing backend service
+            sudo systemctl stop academic-backend || true
             
-            echo "🔍 Testing database adapter..."
-            $PYTHON_CMD -c "
-            try:
-                import psycopg2
-                print('✅ psycopg2 available')
-            except ImportError:
-                print('❌ psycopg2 not available, trying psycopg2-binary')
-                try:
-                    import psycopg2
-                    print('✅ psycopg2-binary available')
-                except ImportError:
-                    print('❌ No PostgreSQL adapter available')
-            "
-            
-            echo "🔍 Testing WSGI module..."
-            $PYTHON_CMD -c "
-            import os
-            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
-            try:
-                from core.wsgi import application
-                print('✅ WSGI module loads successfully')
-            except Exception as e:
-                print(f'❌ WSGI module failed: {e}')
-                exit(1)
-            "
-            
+            # Test Django configuration first
+            echo "🔍 Verificando configuración de Django..."
             $PYTHON_CMD manage.py check || { 
               echo "❌ Django check failed"
               $PYTHON_CMD manage.py check --deploy || true
               exit 1
             }
             
-            # Simple port verification
-            echo "🔍 Verificación final del puerto 8000..."
-            sleep 2
+            # Create systemd service for backend
+            sudo tee /etc/systemd/system/academic-backend.service > /dev/null <<EOF
+            [Unit]
+            Description=Academic SaaS Backend
+            After=network.target postgresql.service
+            Requires=postgresql.service
             
-            echo "🚀 Iniciando gunicorn en puerto 8000..."
-            nohup $PYTHON_CMD -m gunicorn --bind 127.0.0.1:8000 --workers 2 --pid /tmp/django.pid --log-level debug core.wsgi:application > /tmp/django.log 2>&1 &
+            [Service]
+            Type=simple
+            User=ec2-user
+            WorkingDirectory=/home/ec2-user/academic-saas-backend
+            Environment="ENVIRONMENT=dev"
+            Environment="DATABASE_URL=postgresql://academic_saas_dev:dev_password_123@localhost:5432/academic_saas_dev"
+            Environment="SECRET_KEY=$SECRET_KEY_VALUE"
+            Environment="DEBUG=True"
+            Environment="ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
+            Environment="CORS_ALLOWED_ORIGINS=http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}"
+            ExecStart=$PYTHON_CMD -m gunicorn --bind 127.0.0.1:8000 --workers 2 core.wsgi:application
+            Restart=always
+            RestartSec=10
+            StandardOutput=append:/home/ec2-user/academic-saas-backend/backend.log
+            StandardError=append:/home/ec2-user/academic-saas-backend/backend-error.log
             
-            echo "⏳ Esperando que Django esté listo..."
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            
+            # Start backend service
+            echo "🚀 Iniciando servicio backend..."
+            sudo systemctl daemon-reload
+            sudo systemctl enable academic-backend
+            sudo systemctl restart academic-backend
+            
+            # Wait for backend to start
+            echo "⏳ Esperando que el backend esté listo..."
             sleep 15
             
-            # Verify Django process started
-            if [ -f /tmp/django.pid ]; then
-              echo "✅ Django PID file created: $(cat /tmp/django.pid)"
-              if ps -p $(cat /tmp/django.pid) > /dev/null 2>&1; then
-                echo "✅ Django process is running"
-              else
-                echo "❌ Django process not found, checking logs:"
-                tail -n 30 /tmp/django.log || echo "No logs available"
-                echo "❌ Django process died, this indicates a startup error"
-              fi
+            # Verify backend service
+            if sudo systemctl is-active --quiet academic-backend; then
+              echo "✅ Backend service is running!"
+              
+              # Check if backend responds
+              for i in {1..6}; do
+                if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
+                  echo "✅ Backend responding on port 8000"
+                  break
+                else
+                  echo "⏳ Waiting for backend to respond... ($i/6)"
+                  sleep 5
+                fi
+              done
             else
-              echo "❌ Django PID file not created"
-              echo "Checking if gunicorn started at all:"
-              tail -n 30 /tmp/django.log || echo "No logs available"
-            fi
-            
-            # Additional Django debugging
-            echo "🔍 Testing Django manually..."
-            timeout 10 $PYTHON_CMD manage.py runserver 127.0.0.1:8001 --noreload &
-            sleep 3
-            if curl -f http://localhost:8001/admin/login/ > /dev/null 2>&1; then
-              echo "✅ Django can start manually - issue is with gunicorn"
-              kill %1 2>/dev/null || true
-            else
-              echo "❌ Django cannot start even manually - configuration issue"
-              kill %1 2>/dev/null || true
+              echo "❌ Backend service failed to start"
+              sudo journalctl -u academic-backend -n 50
+              exit 1
             fi
             
             echo "🌐 Configurando Nginx..."
@@ -358,48 +350,22 @@ jobs:
             sudo rm -f /etc/nginx/conf.d/academic-saas-frontend.conf || true
             sudo rm -f /etc/nginx/conf.d/default.conf || true
             
-            # Copy nginx configuration
-            sudo cp nginx.conf /etc/nginx/nginx.conf
+            # Copy nginx development configuration
+            sudo cp nginx-dev.conf /etc/nginx/nginx.conf
             
             # Test nginx configuration
             sudo nginx -t || { echo "Nginx config test failed"; cat /var/log/nginx/error.log || true; exit 1; }
             
-            # Only start nginx if Django is running
-            if ! curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-              echo "❌ Django not responding, not starting nginx"
-              exit 1
-            fi
-            
             # Start nginx
             sudo systemctl enable nginx
-            sudo systemctl start nginx
+            sudo systemctl restart nginx
             
             echo "⏳ Esperando que Nginx esté listo..."
             sleep 5
             
-            # Check if process started
-            if [ -f /tmp/django.pid ]; then
-              echo "✅ Django PID file created: $(cat /tmp/django.pid)"
-            else
-              echo "❌ Django PID file not found"
-            fi
+            echo "🔍 Verificando salud del servicio completo..."
             
-            echo "🔍 Verificando salud del servicio..."
-            # Wait a bit more and check Django directly first
-            sleep 5
-            
-            # Check Django directly on port 8000
-            for i in {1..3}; do
-              if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-                echo "✅ Django está respondiendo directamente"
-                break
-              else
-                echo "Intento $i/3: Django no responde directamente, esperando..."
-                sleep 5
-              fi
-            done
-            
-            # Check if service is responding through nginx
+            # Final verification through nginx
             for i in {1..5}; do
               if curl -f http://localhost/admin/login/ > /dev/null 2>&1; then
                 echo "✅ Backend con Nginx desplegado exitosamente!"
@@ -409,18 +375,21 @@ jobs:
                 exit 0
               else
                 echo "Intento $i/5: Esperando respuesta del servidor..."
-                echo "Verificando logs de Django:"
-                tail -n 10 /tmp/django.log || echo "No hay logs disponibles"
-                echo "Verificando procesos:"
-                ps aux | grep gunicorn || echo "No hay procesos gunicorn"
+                if [ $i -eq 5 ]; then
+                  echo "Verificando logs del backend:"
+                  sudo journalctl -u academic-backend -n 20 || echo "No hay logs disponibles"
+                  echo "Verificando procesos:"
+                  sudo systemctl status academic-backend || echo "Servicio no activo"
+                fi
                 sleep 5
               fi
             done
             
             echo "❌ Error: El backend no responde después de varios intentos"
-            echo "Logs del proceso:"
-            tail -n 50 /tmp/django.log || echo "No hay logs disponibles en /tmp/django.log"
-            ps aux | grep gunicorn || echo "No hay procesos gunicorn"
+            echo "Estado del servicio backend:"
+            sudo systemctl status academic-backend || echo "Servicio no disponible"
+            echo "Logs del backend:"
+            sudo journalctl -u academic-backend -n 50 || echo "No hay logs disponibles"
             exit 1
 
       - name: Verify deployment

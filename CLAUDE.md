@@ -138,6 +138,46 @@ This is a Django REST Framework-based multi-tenant academic management system wh
 - Admin user: `admin` / `admin123`
 - Admin panel: http://localhost:8000/admin/
 
+### GitHub Repository Secrets Configuration
+
+**Frontend Repository Secrets Required:**
+
+**Development Environment:**
+```
+NEXT_PUBLIC_API_URL=http://52.20.22.173:8000
+NEXTAUTH_URL=http://52.20.22.173:3000
+NEXTAUTH_SECRET=[secure-random-string]
+EC2_HOST_DEV=52.20.22.173
+EC2_SSH_KEY=[private-ssh-key-content]
+```
+
+**Production Environment:**
+```
+NEXT_PUBLIC_API_URL_PROD=http://[production-domain]:8000
+NEXTAUTH_URL_PROD=http://[production-domain]:3000
+NEXTAUTH_SECRET=[secure-random-string]
+EC2_HOST_PROD=[production-ip-or-domain]
+EC2_SSH_KEY=[private-ssh-key-content]
+```
+
+**Backend Repository Secrets Required:**
+
+**Development Environment:**
+```
+EC2_HOST_DEV=52.20.22.173
+EC2_SSH_KEY=[private-ssh-key-content]
+DATABASE_URL_DEV=postgresql://admin:admin123@localhost:5432/academic_saas_dev
+SECRET_KEY_DEV=[django-secret-key]
+```
+
+**Production Environment:**
+```
+EC2_HOST_PROD=[production-ip-or-domain]
+EC2_SSH_KEY=[private-ssh-key-content]
+DATABASE_URL_PROD=[production-database-url]
+SECRET_KEY_PROD=[django-secret-key]
+```
+
 ### Static and Media Files
 - Static files served via WhiteNoise in production
 - Media files stored locally in `media/` directory
@@ -300,10 +340,53 @@ All Django API endpoints are integrated with typed React Query hooks:
 - **Admin Panel**: http://52.20.22.173:8000/admin/
 
 **GitHub Actions Deployment:**
-- Deployments to dev environment are automatically triggered on pull requests to `dev` branch
-- Deployments to production environment are triggered when PRs to `main` branch are merged
+- Deployments to dev environment are automatically triggered on push to `dev` branch
+- Deployments to production environment are triggered when pushing to `main` branch
 - Both backend and frontend use SSH direct deployment strategy
 - Health checks are performed after deployment to ensure services are running correctly
+
+### Frontend Access Troubleshooting
+
+**Common Issue: "Can't access frontend with demo credentials"**
+
+**Root Cause**: Environment variables in GitHub secrets pointing to localhost instead of external IP.
+
+**Symptoms:**
+- Frontend redirects to authentication but login fails
+- Authentication redirects loop back to localhost URLs
+- External access via 52.20.22.173 not working
+
+**Solution:**
+1. **Update GitHub Repository Secrets** (frontend repo):
+   ```
+   NEXT_PUBLIC_API_URL = http://52.20.22.173:8000
+   NEXTAUTH_URL = http://52.20.22.173:3000
+   NEXTAUTH_SECRET = [keep existing secure value]
+   ```
+
+2. **Trigger Redeployment:**
+   - Make any small change to trigger dev workflow
+   - Push to dev branch to redeploy with correct environment variables
+
+3. **Verify Deployment:**
+   ```bash
+   # Check frontend service status
+   curl -I http://52.20.22.173:3000/
+   
+   # Check authentication endpoint
+   curl -s http://52.20.22.173:3000/api/auth/signin
+   ```
+
+**Environment Variable Requirements:**
+- **Dev Environment**: Use external IP (52.20.22.173) for all URLs
+- **Local Development**: Use localhost for all URLs
+- **Production**: Use production domain for all URLs
+
+**Deployment Architecture:**
+- Frontend runs as Node.js service on port 3000 (systemd)
+- Backend runs as Gunicorn service on port 8000 (systemd)
+- Nginx proxies external traffic to both services
+- Static files served through Next.js (not pre-rendered)
 
 ### Important Deployment Notes
 
@@ -318,3 +401,97 @@ All Django API endpoints are integrated with typed React Query hooks:
 - nginx serves the static Next.js build files directly
 - No Node.js process managers (PM2) are used in production
 - nginx handles all static file serving and routing
+
+## Environment Synchronization & Secrets Management
+
+### Critical Issue: Build-time vs Runtime Variables
+
+**Problem**: Next.js `NEXT_PUBLIC_*` variables are baked into the build at build time, not at runtime. This means:
+- Changing systemd environment variables alone won't fix frontend configuration
+- GitHub repository secrets must match actual deployment environment
+- Frontend must be rebuilt when environment variables change
+
+### Environment Verification Process
+
+**Run verification script:**
+```bash
+./verify_environment.sh dev
+```
+
+**Manual verification commands:**
+```bash
+# Check frontend service environment
+ssh ec2-user@52.20.22.173 "sudo systemctl show academic-frontend --property=Environment"
+
+# Check for old URLs in build
+ssh ec2-user@52.20.22.173 "grep -r 'academic-saas-dev-backend-alb' /home/ec2-user/academic-saas-frontend/.next/ 2>/dev/null | wc -l"
+
+# Test backend authentication
+curl -X POST http://52.20.22.173:8000/api/auth/login/ \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}'
+```
+
+### Required GitHub Secrets (Current Status)
+
+**Frontend Repository (jlcp89/academic-saas-frontend)**:
+```bash
+# CORRECT VALUES NEEDED:
+NEXT_PUBLIC_API_URL = http://52.20.22.173:8000
+NEXTAUTH_URL = http://52.20.22.173:3000
+NEXTAUTH_SECRET = /bG5bl9y23JSqYstIc/c+uoY/3eIwlPeInJU9kiJd7I=
+EC2_HOST_DEV = 52.20.22.173
+EC2_SSH_KEY = [private-ssh-key-content]
+
+# CURRENT INCORRECT VALUES:
+# NEXT_PUBLIC_API_URL = http://academic-saas-dev-backend-alb-1977961495.us-east-1.elb.amazonaws.com
+# NEXTAUTH_URL = http://academic-saas-dev-frontend-alb-560850445.us-east-1.elb.amazonaws.com
+```
+
+### Step-by-Step Fix Process
+
+1. **Update GitHub Repository Secrets**:
+   - Go to GitHub repository: `jlcp89/academic-saas-frontend`
+   - Settings → Secrets and variables → Actions
+   - Update the secrets with correct IP addresses
+
+2. **Trigger Redeployment**:
+   ```bash
+   # Make small change to trigger workflow
+   echo "Deploy $(date)" >> test-deployment-trigger.txt
+   git add test-deployment-trigger.txt
+   git commit -m "Trigger deployment with correct environment variables"
+   git push origin dev
+   ```
+
+3. **Monitor Deployment**:
+   ```bash
+   # Watch GitHub Actions workflow
+   # Verify deployment with verification script
+   ./verify_environment.sh dev
+   ```
+
+4. **Verify Fix**:
+   ```bash
+   # Should show 0 references to old URLs
+   ssh ec2-user@52.20.22.173 "grep -r 'academic-saas-dev-backend-alb' /home/ec2-user/academic-saas-frontend/.next/ 2>/dev/null | wc -l"
+   
+   # Test login functionality
+   # Visit: http://52.20.22.173:3000
+   # Login with: admin / admin123
+   ```
+
+### Environment Consistency Rules
+
+1. **Never manually edit environment variables on EC2** - always use GitHub deployment
+2. **Always verify secrets match deployment environment** before troubleshooting
+3. **Run verification script after any deployment** to catch mismatches early
+4. **Frontend requires rebuild** when environment variables change (not just restart)
+
+### Common Pitfalls
+
+- ❌ Changing systemd environment variables manually
+- ❌ Assuming runtime environment variables work for Next.js public variables
+- ❌ Not rebuilding frontend after environment variable changes
+- ✅ Update GitHub secrets → Deploy → Verify
+- ✅ Use verification script to catch issues early
