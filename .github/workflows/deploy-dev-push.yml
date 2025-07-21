@@ -143,17 +143,29 @@ jobs:
             
             # Kill any remaining processes on port 8000
             echo "🔍 Limpiando puerto 8000..."
-            sudo pkill -f "gunicorn.*8000" || true
-            # Use a subshell to prevent fuser exit code from propagating
-            (sudo fuser -k 8000/tcp 2>/dev/null || true) || true
-            sleep 5
             
-            # Double check port is free
-            if sudo lsof -ti:8000 >/dev/null 2>&1; then
-              echo "⚠️ Puerto 8000 aún ocupado, forzando limpieza..."
-              sudo kill -9 $(sudo lsof -ti:8000) 2>/dev/null || true
+            # First, try to stop gunicorn processes gracefully
+            if pgrep -f "gunicorn.*8000" > /dev/null 2>&1; then
+              echo "Stopping gunicorn processes..."
+              sudo pkill -f "gunicorn.*8000" || true
               sleep 2
             fi
+            
+            # Then check if port is still in use and kill processes if needed
+            if sudo lsof -ti:8000 > /dev/null 2>&1; then
+              echo "Port 8000 still in use, cleaning up..."
+              for pid in $(sudo lsof -ti:8000); do
+                sudo kill -15 "$pid" 2>/dev/null || true
+              done
+              sleep 2
+              
+              # Force kill if still running
+              for pid in $(sudo lsof -ti:8000 2>/dev/null); do
+                sudo kill -9 "$pid" 2>/dev/null || true
+              done
+            fi
+            
+            echo "Port 8000 cleanup completed"
             
             echo "✅ Limpieza completada"
             
