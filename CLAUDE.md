@@ -6,45 +6,64 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Environment Setup
 ```bash
-# Install dependencies with Poetry
+# Install dependencies with pip (Python venv)
+cd academic_saas
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Alternative: Install dependencies with Poetry (if preferred)
 poetry install
-
-# Activate Poetry virtual environment
 poetry shell
-
-# Or run commands with Poetry
-poetry run python manage.py [command]
 ```
 
 ### Running the Application
 ```bash
-# Local development with PostgreSQL and Nginx
-../run_local.sh
+# Local development with PostgreSQL (connects to dev DB)
+./run_local.sh
 
-# Manual start with Poetry
+# Manual start with venv
+cd academic_saas
+source venv/bin/activate
+python manage.py runserver 0.0.0.0:8000
+
+# Manual start with Poetry (alternative)
 poetry run python manage.py runserver 0.0.0.0:8000
 ```
 
 ### Database Management
 ```bash
-# Create migrations after model changes
+# Create migrations after model changes (with venv)
+source venv/bin/activate
+python manage.py makemigrations
+
+# Apply migrations (with venv)
+python manage.py migrate
+
+# Create superuser (with venv)
+python manage.py createsuperuser
+
+# Alternative with Poetry
 poetry run python manage.py makemigrations
-
-# Apply migrations
 poetry run python manage.py migrate
-
-# Create superuser
 poetry run python manage.py createsuperuser
 ```
 
 ### Database Configuration
-- **Local Environment**: PostgreSQL database `academic_saas_local` with user `academic_saas_local`
-- **Dev Environment**: PostgreSQL database `academic_saas_dev` with user `academic_saas_dev`  
+- **Local Development**: Connects to remote PostgreSQL dev database via `run_local.sh`
+- **Dev Environment**: PostgreSQL database `academic_saas_dev` on EC2 (52.20.22.173:5432)
 - **Production**: Configurable via `DATABASE_URL` environment variable
+- **Important**: This project does NOT use SQLite - always use PostgreSQL
 
 ### Dependency Management Strategy
-**Poetry ensures exact version consistency across all environments:**
+**The project supports both pip and Poetry for dependency management:**
 
+**Primary Method - pip with venv:**
+- **requirements.txt**: Contains exact package versions for production
+- **Local Development**: Uses `python3 -m venv venv` + `pip install -r requirements.txt`
+- **Deployment**: Uses `pip install -r requirements.txt` on EC2 instances
+
+**Alternative Method - Poetry:**
 - **pyproject.toml**: Defines dependency ranges and project metadata
 - **poetry.lock**: Locks exact versions (commit this file to git)
 - **Local**: Uses `poetry install` (includes dev dependencies for testing)
@@ -58,16 +77,25 @@ poetry run python manage.py createsuperuser
 
 ### Testing
 ```bash
-# Run all tests
-poetry run python manage.py test
+# Run all tests (with venv)
+source venv/bin/activate
+python manage.py test
 
-# Run tests for specific app
+# Run tests for specific app (with venv)
+python manage.py test apps.users
+
+# Alternative with Poetry
+poetry run python manage.py test
 poetry run python manage.py test apps.users
 ```
 
 ### Django Shell
 ```bash
-# Access Django shell for debugging/data manipulation
+# Access Django shell for debugging/data manipulation (with venv)
+source venv/bin/activate
+python manage.py shell
+
+# Alternative with Poetry
 poetry run python manage.py shell
 ```
 
@@ -137,6 +165,65 @@ This is a Django REST Framework-based multi-tenant academic management system wh
 ### Default Credentials
 - Admin user: `admin` / `admin123`
 - Admin panel: http://localhost:8000/admin/
+
+## Local Development Setup (July 2025)
+
+### Database Connection Configuration
+The local development environment connects to the remote PostgreSQL database on the EC2 dev instance. This was configured in July 2025 with the following setup:
+
+**Database Connection Details:**
+- **Host**: 52.20.22.173 (EC2 dev instance)
+- **Port**: 5432
+- **Database**: academic_saas_dev
+- **User**: admin (with superuser privileges)
+- **Password**: admin123
+
+**Key Setup Changes Made:**
+1. **Database Permissions**: Granted superuser privileges to `admin` user on remote PostgreSQL
+2. **Script Updates**: Modified `run_local.sh` to use pip + venv instead of Poetry
+3. **Connection Method**: Local environment connects directly to remote dev database
+4. **No SQLite**: Confirmed project does NOT use SQLite - PostgreSQL only
+
+### Running Local Development
+```bash
+# Quick start - runs both backend and frontend
+./run_local.sh
+
+# Access points:
+# - Frontend: http://localhost:3000
+# - Backend API: http://localhost:8000
+# - Django Admin: http://localhost:8000/admin/
+# - API Docs: http://localhost:8000/api/docs/
+```
+
+### Database Permissions Setup (Reference)
+The following commands were executed on the EC2 instance to grant proper permissions:
+
+```sql
+-- Run on EC2 PostgreSQL as postgres user
+ALTER USER admin WITH SUPERUSER;
+GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO admin;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO admin;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO admin;
+```
+
+### Local Development Environment Variables
+The `.env` file in `academic_saas/` directory contains:
+```bash
+SECRET_KEY=django-insecure-academic-saas-development-key-2024
+DEBUG=True
+DATABASE_URL=postgresql://admin:admin123@52.20.22.173:5432/academic_saas_dev
+ALLOWED_HOSTS=localhost,127.0.0.1,*
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+DISABLE_MIGRATION_CHECK=True
+```
+
+### Important Notes
+- **No Migrations**: Local environment skips migrations since connecting to existing dev database
+- **No SQLite**: Project policy - never use SQLite, always PostgreSQL
+- **Dependency Management**: Supports both pip+venv (primary) and Poetry (alternative)
+- **Database Access**: Full admin privileges on remote dev database for local development
 
 ### GitHub Repository Secrets Configuration
 

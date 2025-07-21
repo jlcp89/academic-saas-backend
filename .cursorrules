@@ -1,0 +1,559 @@
+# Cursor Rules for Academic SaaS Django Backend
+
+## Core Technologies
+- **Django 4.2.9** with REST Framework 3.14.0
+- **Python 3.8+** with pip and requirements.txt for dependency management
+- **PostgreSQL** with psycopg2-binary for production database
+- **Django REST Framework** with JWT authentication (SimpleJWT)
+- **Celery 5.3.4** with Redis for background tasks
+- **Django Celery Beat** for scheduled tasks
+- **WhiteNoise** for static file serving
+- **Boto3** with Django Storages for AWS S3
+- **DRF Spectacular** for API documentation
+
+## Multi-Tenant SaaS Architecture
+
+### Core Components
+- **Organizations App**: School entities as tenants with subscription management
+- **Users App**: Custom User model with role-based access (SUPERADMIN, ADMIN, PROFESSOR, STUDENT)
+- **Academic App**: Academic entities (subjects, sections, enrollments, assignments, submissions)
+- **Dashboard App**: Analytics and reporting
+- **AI App**: AI/ML features
+- **Reports App**: Reporting system
+
+### Key Architectural Patterns
+- **Tenant Isolation**: `TenantAwareViewSet` automatically filters data by user's school
+- **Role-Based Permissions**: `IsSuperAdmin`, `IsSchoolAdmin`, `IsProfessor`, `IsStudent`
+- **Object-Level Permissions**: `IsOwnerOrAdmin`, `IsSameSchool`
+- **JWT Authentication**: 60-minute access tokens, 7-day refresh tokens with rotation
+
+## Project Structure
+```
+academic_saas/
+├── apps/                    # Django applications
+│   ├── users/              # Custom User model with roles
+│   ├── organizations/      # Multi-tenant schools and subscriptions
+│   ├── academic/           # Core academic functionality
+│   ├── dashboard/          # Dashboard and analytics
+│   ├── ai/                 # AI/ML features
+│   ├── reports/            # Reporting system
+│   ├── base.py            # TenantAwareViewSet base class
+│   └── permissions.py     # Custom permissions system
+├── core/                   # Django project settings
+│   ├── settings.py        # Main settings with environment config
+│   ├── urls.py            # Root URL configuration
+│   ├── wsgi.py            # WSGI application
+│   └── asgi.py            # ASGI application
+├── infrastructure/         # Infrastructure configuration
+├── staticfiles/           # Collected static files
+├── media/                 # User uploaded files
+├── manage.py              # Django management script
+├── requirements.txt       # Python dependencies
+└── pyproject.toml         # Poetry configuration (legacy)
+```
+
+## Code Conventions
+
+### Python Style
+- Follow **PEP 8** strictly with Black formatter (88 chars line length)
+- Use **isort** for import organization
+- Use **flake8** for linting
+- Use **type hints** for function parameters and return values
+- Use **docstrings** for classes and functions
+
+### Django Best Practices
+- **Apps**: Modular design with clear separation of concerns
+- **Models**: Use Django ORM, avoid raw SQL unless necessary
+- **Views**: ALWAYS extend `TenantAwareViewSet` for school-scoped models
+- **Serializers**: Use DRF serializers for API responses
+- **URLs**: RESTful URL patterns with clear naming
+
+### Multi-Tenant Development Rules
+- **ALWAYS** extend `TenantAwareViewSet` for school-scoped models
+- **NEVER** access cross-school data (except SUPERADMIN operations)
+- Use role-based permissions from `apps/permissions.py`
+- Auto-assign school on object creation via `TenantAwareViewSet`
+
+### Naming Conventions
+- **Files**: snake_case (`user_views.py`, `academic_models.py`)
+- **Classes**: PascalCase (`UserProfile`, `AcademicRecord`)
+- **Functions/Variables**: snake_case (`get_user_data`, `is_active`)
+- **Constants**: UPPER_SNAKE_CASE (`MAX_FILE_SIZE`, `DEFAULT_TIMEOUT`)
+- **URLs**: kebab-case (`user-profile/`, `academic-records/`)
+
+### File Structure Template
+```python
+# 1. Standard library imports
+from datetime import datetime
+from typing import List, Optional
+
+# 2. Third-party imports
+from django.db import models
+from django.contrib.auth.models import AbstractUser
+from rest_framework import serializers
+
+# 3. Local imports
+from apps.base import TenantAwareViewSet
+from apps.permissions import IsSchoolAdmin
+
+# 4. Constants
+MAX_NAME_LENGTH = 255
+DEFAULT_TIMEOUT = 30
+
+# 5. Models
+class User(AbstractUser):
+    """Custom user model with role-based access."""
+    
+    class Role(models.TextChoices):
+        SUPERADMIN = 'SUPERADMIN', 'Super Admin'
+        ADMIN = 'ADMIN', 'School Admin'
+        PROFESSOR = 'PROFESSOR', 'Professor'
+        STUDENT = 'STUDENT', 'Student'
+    
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.STUDENT)
+    school = models.ForeignKey(
+        'organizations.School',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='users'
+    )
+    
+    class Meta:
+        db_table = 'users'
+        verbose_name = 'User'
+        verbose_name_plural = 'Users'
+
+# 6. Serializers
+class UserSerializer(serializers.ModelSerializer):
+    """Serializer for User model."""
+    
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'role', 'school']
+        read_only_fields = ['id']
+
+# 7. Views
+class UserViewSet(TenantAwareViewSet):
+    """ViewSet for User model with tenant isolation."""
+    
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsSchoolAdmin]
+    
+    def get_queryset(self):
+        """Filter by organization and add optimizations."""
+        return super().get_queryset().select_related('school')
+
+# 8. URLs (in urls.py)
+# urlpatterns = [
+#     path('users/', UserViewSet.as_view({'get': 'list', 'post': 'create'})),
+#     path('users/<int:pk>/', UserViewSet.as_view({'get': 'retrieve', 'put': 'update', 'delete': 'destroy'})),
+# ]
+```
+
+## Development Patterns
+
+### Models with Tenant Isolation
+```python
+# ✅ Correct - Model with tenant awareness
+class Assignment(BaseModel):
+    """Assignment model for academic tasks."""
+    
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    due_date = models.DateTimeField()
+    subject = models.ForeignKey(
+        'academic.Subject',
+        on_delete=models.CASCADE,
+        related_name='assignments'
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='created_assignments'
+    )
+    
+    class Meta:
+        db_table = 'assignments'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['due_date']),
+            models.Index(fields=['subject', 'created_by']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.title} - {self.subject.name}"
+    
+    def is_overdue(self) -> bool:
+        """Check if assignment is overdue."""
+        return datetime.now() > self.due_date
+```
+
+### Views with TenantAwareViewSet
+```python
+# ✅ Correct - TenantAwareViewSet with proper permissions
+from django.core.exceptions import PermissionDenied
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+class AssignmentViewSet(TenantAwareViewSet):
+    """ViewSet for Assignment model with tenant isolation."""
+    
+    queryset = Assignment.objects.select_related('subject', 'created_by')
+    serializer_class = AssignmentSerializer
+    permission_classes = [IsProfessor]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['subject', 'created_by']
+    search_fields = ['title', 'description']
+    ordering_fields = ['due_date', 'created_at']
+    
+    def perform_create(self, serializer):
+        """Set created_by automatically."""
+        serializer.save(created_by=self.request.user)
+    
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        """Submit assignment submission."""
+        try:
+            assignment = self.get_object()
+            # Business logic here
+            return Response({'status': 'submitted'})
+        except PermissionDenied:
+            return Response(
+                {'error': 'Permission denied'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+```
+
+### Serializers with Tenant Context
+```python
+# ✅ Correct - Nested serializer with tenant validation
+class AssignmentSerializer(serializers.ModelSerializer):
+    """Serializer for Assignment model."""
+    
+    subject_name = serializers.CharField(source='subject.name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    is_overdue = serializers.BooleanField(read_only=True)
+    
+    class Meta:
+        model = Assignment
+        fields = [
+            'id', 'title', 'description', 'due_date', 'subject', 
+            'subject_name', 'created_by', 'created_by_name', 'is_overdue'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'is_overdue']
+    
+    def validate_subject(self, value):
+        """Validate subject belongs to user's school."""
+        if value.school != self.context['request'].user.school:
+            raise serializers.ValidationError("Subject must belong to your school.")
+        return value
+    
+    def to_representation(self, instance):
+        """Add computed fields."""
+        data = super().to_representation(instance)
+        data['is_overdue'] = instance.is_overdue()
+        return data
+```
+
+## API Design
+
+### RESTful Endpoints
+```python
+# ✅ Correct - RESTful URL patterns with tenant isolation
+# /api/v1/assignments/                    # List/Create assignments (school-scoped)
+# /api/v1/assignments/{id}/               # Retrieve/Update/Delete assignment
+# /api/v1/assignments/{id}/submit/        # Custom action
+# /api/v1/assignments/{id}/submissions/   # Related submissions
+```
+
+### Response Format
+```python
+# ✅ Correct - Consistent API response format
+{
+    "success": True,
+    "data": {
+        "id": 1,
+        "title": "Assignment Title",
+        "description": "Description",
+        "due_date": "2024-01-15T23:59:59Z",
+        "subject_name": "Mathematics",
+        "created_by_name": "John Doe",
+        "is_overdue": False
+    },
+    "message": "Assignment retrieved successfully"
+}
+```
+
+## Authentication & Security
+
+### JWT Configuration
+```python
+# ✅ Correct - JWT settings
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'VERIFYING_KEY': None,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}
+```
+
+### Permission Classes
+```python
+# ✅ Correct - Use custom permissions
+from apps.permissions import IsSchoolAdmin, IsProfessor, IsStudent
+
+class SchoolViewSet(TenantAwareViewSet):
+    permission_classes = [IsSchoolAdmin]  # Only school admins
+
+class AssignmentViewSet(TenantAwareViewSet):
+    permission_classes = [IsProfessor]    # Only professors
+```
+
+## Environment Configuration
+
+### Database Configuration
+- **Local Development**: Connects to remote PostgreSQL dev database (52.20.22.173:5432)
+- **Dev Environment**: PostgreSQL database `academic_saas_dev` on EC2
+- **Production**: Configurable via `DATABASE_URL` environment variable
+- **Important**: This project does NOT use SQLite - always use PostgreSQL
+
+### Environment Variables
+```python
+# ✅ Correct - Environment configuration
+from decouple import config
+
+SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', cast=bool, default=False)
+DATABASE_URL = config('DATABASE_URL')
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+
+# CORS settings - Configurable via environment variables
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=lambda v: [s.strip() for s in v.split(',')], default=[
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://52.20.22.173",
+    "http://52.20.22.173:3000",
+])
+CORS_ALLOW_CREDENTIALS = True
+```
+
+## Performance Optimization
+
+### Database Optimization
+```python
+# ✅ Correct - Optimized queries with tenant isolation
+class AssignmentViewSet(TenantAwareViewSet):
+    """Optimized ViewSet with select_related and prefetch_related."""
+    
+    def get_queryset(self):
+        return Assignment.objects.select_related(
+            'subject', 'created_by'
+        ).prefetch_related(
+            'submissions__student'
+        ).filter(
+            subject__school=self.request.user.school
+        )
+```
+
+### Caching Strategy
+```python
+# ✅ Correct - Caching implementation with tenant isolation
+from django.core.cache import cache
+from django.views.decorators.cache import cache_page
+
+@cache_page(60 * 15)  # Cache for 15 minutes
+def dashboard_stats(request):
+    """Cached dashboard statistics."""
+    cache_key = f"dashboard_stats_{request.user.school.id}"
+    stats = cache.get(cache_key)
+    
+    if not stats:
+        stats = calculate_dashboard_stats(request.user.school)
+        cache.set(cache_key, stats, 60 * 15)  # 15 minutes
+    
+    return Response(stats)
+```
+
+## Background Tasks
+
+### Celery Tasks
+```python
+# ✅ Correct - Celery task implementation
+from celery import shared_task
+from django.core.mail import send_mail
+
+@shared_task(bind=True, max_retries=3)
+def send_assignment_reminder(self, assignment_id: int):
+    """Send reminder email for assignment due date."""
+    try:
+        assignment = Assignment.objects.get(id=assignment_id)
+        # Send email logic
+        send_mail(
+            subject=f"Reminder: {assignment.title}",
+            message=f"Your assignment is due on {assignment.due_date}",
+            from_email="noreply@academicsaas.com",
+            recipient_list=[assignment.created_by.email]
+        )
+    except Assignment.DoesNotExist:
+        self.retry(countdown=60)  # Retry after 1 minute
+    except Exception as exc:
+        self.retry(exc=exc, countdown=60)
+```
+
+## Testing
+
+### Test Structure
+```python
+# ✅ Correct - Comprehensive test structure with tenant isolation
+import pytest
+from django.test import TestCase
+from rest_framework.test import APITestCase
+from rest_framework import status
+
+class AssignmentModelTest(TestCase):
+    """Test cases for Assignment model."""
+    
+    def setUp(self):
+        """Set up test data."""
+        self.school = School.objects.create(name="Test School")
+        self.user = User.objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            school=self.school,
+            role=User.Role.PROFESSOR
+        )
+    
+    def test_assignment_creation(self):
+        """Test assignment creation."""
+        assignment = Assignment.objects.create(
+            title="Test Assignment",
+            description="Test Description",
+            due_date=datetime.now() + timedelta(days=7),
+            created_by=self.user
+        )
+        self.assertEqual(assignment.title, "Test Assignment")
+
+class AssignmentAPITest(APITestCase):
+    """Test cases for Assignment API."""
+    
+    def setUp(self):
+        """Set up test data."""
+        # Setup code here
+    
+    def test_list_assignments(self):
+        """Test listing assignments."""
+        response = self.client.get('/api/v1/assignments/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+```
+
+## Development Commands
+
+### Environment Setup
+```bash
+# Install dependencies with pip (Python venv)
+cd academic_saas
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Alternative: Install dependencies with Poetry (if preferred)
+poetry install
+poetry shell
+```
+
+### Running the Application
+```bash
+# Local development with PostgreSQL (connects to dev DB)
+./run_local.sh
+
+# Manual start with venv
+cd academic_saas
+source venv/bin/activate
+python manage.py runserver 0.0.0.0:8000
+
+# Manual start with Poetry (alternative)
+poetry run python manage.py runserver 0.0.0.0:8000
+```
+
+### Database Management
+```bash
+# Create migrations after model changes (with venv)
+source venv/bin/activate
+python manage.py makemigrations
+
+# Apply migrations (with venv)
+python manage.py migrate
+
+# Create superuser (with venv)
+python manage.py createsuperuser
+
+# Alternative with Poetry
+poetry run python manage.py makemigrations
+poetry run python manage.py migrate
+poetry run python manage.py createsuperuser
+```
+
+### Testing
+```bash
+# Run all tests (with venv)
+source venv/bin/activate
+python manage.py test
+
+# Run tests for specific app (with venv)
+python manage.py test apps.users
+
+# Alternative with Poetry
+poetry run python manage.py test
+poetry run python manage.py test apps.users
+```
+
+### Django Shell
+```bash
+# Access Django shell for debugging/data manipulation (with venv)
+source venv/bin/activate
+python manage.py shell
+
+# Alternative with Poetry
+poetry run python manage.py shell
+```
+
+## Useful Commands
+```bash
+# Development
+pip install -r requirements.txt  # Install dependencies
+python manage.py runserver       # Run development server
+python manage.py migrate         # Run migrations
+python manage.py collectstatic   # Collect static files
+
+# Testing
+pytest                          # Run tests
+black .                         # Format code
+isort .                         # Sort imports
+flake8                          # Lint code
+
+# Production
+gunicorn core.wsgi:application  # Run with Gunicorn
+celery -A core worker -l info   # Start Celery worker
+celery -A core beat -l info     # Start Celery beat
+```
+
+## Default Credentials
+- Admin user: `admin` / `admin123`
+- Admin panel: http://localhost:8000/admin/
+
+## Resources
+- [Django Documentation](https://docs.djangoproject.com/)
+- [Django REST Framework](https://www.django-rest-framework.org/)
+- [Celery Documentation](https://docs.celeryproject.org/)
+- [Django Best Practices](https://django-best-practices.readthedocs.io/)
+- [Django Security](https://docs.djangoproject.com/en/4.2/topics/security/) 
