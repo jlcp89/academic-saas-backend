@@ -144,7 +144,8 @@ jobs:
             # Kill any remaining processes on port 8000
             echo "🔍 Limpiando puerto 8000..."
             sudo pkill -f "gunicorn.*8000" || true
-            sudo fuser -k 8000/tcp 2>/dev/null || true
+            # Use a subshell to prevent fuser exit code from propagating
+            (sudo fuser -k 8000/tcp 2>/dev/null || true) || true
             sleep 5
             
             # Double check port is free
