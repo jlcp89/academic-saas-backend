@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     "apps.academic",
     "apps.dashboard",
     "apps.reports",
+    "apps.communication",
+    "apps.ai",
     
     "django.contrib.admin",
     "django.contrib.auth",
@@ -55,6 +57,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_filters",
     "drf_spectacular",
+    "channels",
 ]
 
 MIDDLEWARE = [
@@ -237,3 +240,18 @@ if config('AWS_ACCESS_KEY_ID', default=''):
     }
     AWS_LOCATION = 'media'
     MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_LOCATION}/'
+
+# Django Channels configuration for WebSocket support
+ASGI_APPLICATION = 'core.asgi.application'
+
+# Channel layers configuration using existing Redis
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer' if not DEBUG else 'channels.layers.InMemoryChannelLayer',
+        'CONFIG': {
+            "hosts": [('127.0.0.1', 6379)],
+            "capacity": 100,  # Limit capacity to save memory
+            "expiry": 10,  # Short expiry for cost optimization
+        } if not DEBUG else {},
+    },
+}

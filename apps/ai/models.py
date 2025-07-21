@@ -178,4 +178,69 @@ class AITrainingSession(models.Model):
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"{self.session_name} - {self.model_type}" 
+        return f"{self.session_name} - {self.model_type}"
+
+class AcademicRiskPrediction(models.Model):
+    """
+    Predicción de riesgo académico para estudiantes
+    """
+    class RiskLevel(models.TextChoices):
+        LOW = 'LOW', 'Low Risk'
+        MEDIUM = 'MEDIUM', 'Medium Risk'
+        HIGH = 'HIGH', 'High Risk'
+        CRITICAL = 'CRITICAL', 'Critical Risk'
+    
+    school = models.ForeignKey(School, on_delete=models.CASCADE)
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='risk_predictions')
+    
+    # Predicción principal
+    risk_score = models.DecimalField(max_digits=3, decimal_places=2)  # 0.00 - 1.00
+    risk_level = models.CharField(max_length=20, choices=RiskLevel.choices)
+    confidence = models.DecimalField(max_digits=3, decimal_places=2)  # 0.00 - 1.00
+    
+    # Factores de riesgo
+    factors = models.JSONField(default=dict)  # Factores que contribuyen al riesgo
+    predicted_outcome = models.TextField()  # Descripción del resultado predicho
+    
+    # Métricas específicas
+    attendance_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    assignment_completion_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    average_grade = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    late_submissions_count = models.IntegerField(default=0)
+    participation_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    study_time_hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    previous_semester_gpa = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
+    current_semester_gpa = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
+    days_since_last_login = models.IntegerField(default=0)
+    
+    # Estado y seguimiento
+    is_active = models.BooleanField(default=True)
+    last_updated = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('school', 'student')
+        ordering = ['-risk_score', '-last_updated']
+    
+    def __str__(self):
+        return f"Risk Prediction - {self.student.username} ({self.risk_level})"
+    
+    def get_risk_color(self):
+        """Retorna el color CSS para el nivel de riesgo"""
+        colors = {
+            'LOW': 'green',
+            'MEDIUM': 'yellow', 
+            'HIGH': 'orange',
+            'CRITICAL': 'red'
+        }
+        return colors.get(self.risk_level, 'gray')
+    
+    def get_risk_percentage(self):
+        """Retorna el porcentaje de riesgo"""
+        return int(self.risk_score * 100)
+    
+    def get_primary_factors(self):
+        """Retorna los factores principales de riesgo"""
+        if isinstance(self.factors, dict):
+            return list(self.factors.keys())[:3]  # Top 3 factores
+        return [] 

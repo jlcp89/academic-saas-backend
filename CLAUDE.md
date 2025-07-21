@@ -19,16 +19,71 @@ poetry shell
 
 ### Running the Application
 ```bash
-# Local development with PostgreSQL (connects to dev DB)
+# Local development with full stack (recommended)
 ./run_local.sh
 
-# Manual start with venv
+# Includes:
+# - Backend with ASGI (Daphne) for WebSocket support
+# - Frontend with Next.js
+# - Chat system with real-time notifications
+# - AI system with academic risk prediction
+# - Automatic test data generation
+# - Optional Nginx proxy for CSS styles support
+
+# For best frontend styles support, use Nginx proxy:
+# When prompted, answer 'y' to "¿Quieres usar Nginx para proxy local?"
+
+# Manual start with venv (backend only)
 cd academic_saas
 source venv/bin/activate
+daphne -b 0.0.0.0 -p 8000 core.asgi:application
+
+# Alternative: Django dev server (no WebSocket support)
 python manage.py runserver 0.0.0.0:8000
 
 # Manual start with Poetry (alternative)
-poetry run python manage.py runserver 0.0.0.0:8000
+poetry run daphne -b 0.0.0.0 -p 8000 core.asgi:application
+```
+
+### Frontend Styles Configuration (Nginx Proxy)
+
+**Problem**: Frontend CSS styles may not load properly when accessing directly on ports 3000/8000
+**Solution**: Use Nginx reverse proxy based on working EC2 configuration
+
+**Nginx Configuration**:
+- `academic_saas/nginx-local.conf`: Local configuration based on EC2
+- Handles CSS/JS file routing correctly
+- Preserves authentication flow (Django vs NextAuth)
+- Adds WebSocket support for chat
+
+**Usage**:
+```bash
+# Run with Nginx proxy (recommended for styles)
+./run_local.sh
+# Answer 'y' when prompted for Nginx
+
+# Access via proxy (styles work correctly):
+http://localhost/         # Frontend with proper CSS
+http://localhost/api/     # Backend API
+http://localhost/admin/   # Django admin
+http://localhost/chat     # Chat with styles
+
+# Direct access (styles may not work):
+http://localhost:3000/    # Frontend (direct)
+http://localhost:8000/    # Backend (direct)
+```
+
+**Manual Nginx Setup** (if needed):
+```bash
+# Backup current nginx config
+sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
+
+# Use local config based on EC2
+sudo cp academic_saas/nginx-local.conf /etc/nginx/nginx.conf
+
+# Test and reload
+sudo nginx -t
+sudo systemctl reload nginx
 ```
 
 ### Database Management
@@ -166,6 +221,128 @@ This is a Django REST Framework-based multi-tenant academic management system wh
 - Admin user: `admin` / `admin123`
 - Admin panel: http://localhost:8000/admin/
 
+## Chat System (Real-time Communication)
+
+### Architecture Overview
+The chat system uses a cost-optimized hybrid approach:
+- **REST API**: For message CRUD operations (create, read, update, delete)
+- **WebSocket**: For real-time notifications only (not full message content)
+- **Multi-tenant**: Complete data isolation between schools
+
+### Key Components
+
+**Backend (Django + Channels)**:
+- `apps/communication/models.py`: ChatRoom, Message, MessageRead models
+- `apps/communication/consumers.py`: WebSocket consumers for real-time notifications
+- `apps/communication/views.py`: REST API endpoints for chat operations
+- `apps/communication/routing.py`: WebSocket URL routing
+- `core/asgi.py`: ASGI application with WebSocket support
+
+**Frontend (Next.js + React Query)**:
+- `src/hooks/useChat.ts`: React hooks for chat functionality
+- `src/components/chat/`: ChatList and ChatRoom components
+- `src/lib/api-client.ts`: Environment-aware API client
+- `src/types/index.ts`: TypeScript definitions
+
+### WebSocket Endpoints
+```bash
+# Global notifications for authenticated user
+ws://localhost:8000/ws/chat/notifications/
+
+# Room-specific notifications and typing indicators  
+ws://localhost:8000/ws/chat/room/{room_id}/
+```
+
+### REST API Endpoints
+```bash
+GET /api/chat-rooms/                    # List user's chat rooms
+POST /api/chat-rooms/                   # Create new chat room
+GET /api/chat-rooms/{id}/messages/      # Get room messages
+POST /api/chat-rooms/{id}/send_message/ # Send message
+POST /api/chat-rooms/{id}/mark_read/    # Mark messages as read
+```
+
+### Environment Configuration
+- **Local**: `ws://localhost:8000` for WebSocket connections
+- **Dev**: `ws://52.20.22.173:8000` for dev environment
+- **Channel Layers**: In-memory for local, Redis for production
+- **CORS**: Configured for both localhost and dev server access
+
+### Features Implemented
+- Text-only messaging (cost-optimized)
+- Real-time notifications via WebSocket
+- Typing indicators
+- Message read receipts
+- Multi-tenant data isolation
+- Role-based access control
+
+## AI System (Academic Risk Prediction)
+
+### Overview
+Machine learning system that predicts academic risk for students based on:
+- Assignment submission patterns
+- Grade trends
+- Attendance data
+- Enrollment history
+
+### Key Components
+
+**Backend (Django + scikit-learn)**:
+- `apps/ai/ml_models.py`: AcademicRiskPredictor class
+- `apps/ai/models.py`: RiskPrediction model for storing results
+- `apps/ai/tasks.py`: Celery tasks for background ML processing
+- `apps/ai/views.py`: API endpoints for risk predictions
+- `models/`: Stored ML models (academic_risk_model.pkl, academic_risk_scaler.pkl)
+
+**Management Commands**:
+```bash
+# Train the risk prediction model
+python manage.py train_risk_model
+
+# Calculate risk for all students
+python manage.py calculate_risk
+```
+
+### Features
+- **Risk Levels**: LOW, MEDIUM, HIGH, CRITICAL
+- **Batch Processing**: Background tasks for large-scale predictions
+- **Multi-tenant**: School-isolated predictions
+- **Incremental Learning**: Model updates with new data
+- **Confidence Scores**: Prediction reliability metrics
+
+### API Endpoints
+```bash
+GET /api/ai/risk-predictions/           # List risk predictions
+POST /api/ai/calculate-risk/            # Trigger risk calculation
+GET /api/ai/risk-summary/               # School-wide risk summary
+```
+
+### Model Features
+The ML model uses these features for prediction:
+- Assignment submission rate
+- Average grade performance
+- Grade trend (improving/declining)
+- Days since last submission
+- Number of failed assignments
+- Enrollment duration
+
+### Automatic Initialization
+The `run_local.sh` script automatically:
+1. Installs ML dependencies (scikit-learn, joblib, pandas, numpy)
+2. Trains initial model if none exists
+3. Creates test data for predictions
+4. Verifies model functionality
+
+### Usage Examples
+```python
+# In Django shell
+from apps.ai.ml_models import AcademicRiskPredictor
+
+predictor = AcademicRiskPredictor()
+risk_level = predictor.predict_student_risk(student_id)
+print(f"Risk level: {risk_level}")
+```
+
 ## Local Development Setup (July 2025)
 
 ### Database Connection Configuration
@@ -217,6 +394,30 @@ DATABASE_URL=postgresql://admin:admin123@52.20.22.173:5432/academic_saas_dev
 ALLOWED_HOSTS=localhost,127.0.0.1,*
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 DISABLE_MIGRATION_CHECK=True
+```
+
+### Systems Available After Setup
+- **💬 Chat System**: Real-time messaging with WebSocket notifications
+- **🤖 AI Predictions**: Academic risk analysis with machine learning
+- **📊 Dashboard**: School metrics and reporting
+- **👥 User Management**: Multi-tenant with role-based access
+- **📚 Academic Management**: Subjects, assignments, grades, enrollments
+
+### Quick Testing
+```bash
+# Test chat system
+curl -X POST http://localhost:8000/api/chat-rooms/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test Chat","room_type":"GROUP"}'
+
+# Test AI system
+curl http://localhost:8000/api/ai/risk-predictions/ \
+  -H "Authorization: Bearer <token>"
+
+# Test WebSocket (in browser console)
+const ws = new WebSocket('ws://localhost:8000/ws/chat/notifications/');
+ws.onmessage = (event) => console.log('Notification:', JSON.parse(event.data));
 ```
 
 ### Important Notes
