@@ -2,6 +2,7 @@ from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from apps.permissions import IsSuperAdmin, IsSchoolAdmin
 from django.db.models import Count, Avg, Sum
 from django.utils import timezone
 from datetime import datetime, timedelta
@@ -20,7 +21,7 @@ class UserReportView(generics.ListAPIView):
     API view to retrieve user reports with filtering capabilities
     """
     serializer_class = UserReportSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsSchoolAdmin | IsSuperAdmin]
     
     def get_queryset(self):
         queryset = User.objects.all()
@@ -61,7 +62,7 @@ class SectionReportView(generics.ListAPIView):
     API view to retrieve section reports with filtering capabilities
     """
     serializer_class = SectionReportSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsSchoolAdmin | IsSuperAdmin]
     
     def get_queryset(self):
         queryset = Section.objects.all()
@@ -102,15 +103,10 @@ class AssignmentReportView(generics.ListAPIView):
     API view to retrieve assignment reports with filtering capabilities
     """
     serializer_class = AssignmentReportSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsSchoolAdmin | IsSuperAdmin]
     
     def get_queryset(self):
         queryset = Assignment.objects.all()
-        
-        # Filter by section
-        section_id = self.request.query_params.get('section_id')
-        if section_id:
-            queryset = queryset.filter(section_id=section_id)
         
         # Filter by section
         section_id = self.request.query_params.get('section_id')
@@ -143,7 +139,7 @@ class SubmissionReportView(generics.ListAPIView):
     API view to retrieve submission/grade reports with filtering capabilities
     """
     serializer_class = SubmissionReportSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsSchoolAdmin | IsSuperAdmin]
     
     def get_queryset(self):
         queryset = Submission.objects.filter(status='GRADED')
@@ -186,7 +182,7 @@ class EnrollmentReportView(generics.ListAPIView):
     API view to retrieve enrollment reports with filtering capabilities
     """
     serializer_class = EnrollmentReportSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsSchoolAdmin | IsSuperAdmin]
     
     def get_queryset(self):
         queryset = Enrollment.objects.all()
@@ -230,17 +226,11 @@ class EnrollmentReportView(generics.ListAPIView):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsSuperAdmin])
 def system_report_view(request):
     """
     API view to retrieve system-wide analytics (SuperAdmin only)
     """
-    user = request.user
-    if user.role != 'SUPERADMIN':
-        return Response(
-            {'error': 'Permission denied. SuperAdmin access required.'},
-            status=status.HTTP_403_FORBIDDEN
-        )
     
     # Calculate system statistics
     total_schools = School.objects.count()

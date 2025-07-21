@@ -102,7 +102,7 @@ class AssignmentReportSerializer(serializers.ModelSerializer):
     class Meta:
         model = Assignment
         fields = [
-            'id', 'title', 'assignment_type', 'max_points', 'due_date',
+            'id', 'title', 'max_points', 'due_date',
             'section_name', 'subject_name', 'professor_name', 'submission_count',
             'graded_count', 'avg_grade', 'completion_rate', 'late_rate', 'created_at'
         ]
@@ -149,7 +149,7 @@ class SubmissionReportSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     student_email = serializers.CharField(source='student.email', read_only=True)
     assignment_title = serializers.CharField(source='assignment.title', read_only=True)
-    assignment_type = serializers.CharField(source='assignment.assignment_type', read_only=True)
+    assignment_type = serializers.SerializerMethodField()
     section_name = serializers.CharField(source='assignment.section.section_name', read_only=True)
     subject_name = serializers.CharField(source='assignment.section.subject.subject_name', read_only=True)
     max_points = serializers.CharField(source='assignment.total_points', read_only=True)
@@ -168,6 +168,10 @@ class SubmissionReportSerializer(serializers.ModelSerializer):
     
     def get_student_name(self, obj):
         return f"{obj.student.first_name} {obj.student.last_name}"
+    
+    def get_assignment_type(self, obj):
+        # Since assignment_type doesn't exist, we'll return a default value
+        return "ASSIGNMENT"
     
     def get_percentage(self, obj):
         if obj.assignment.total_points > 0 and obj.points_earned is not None:
