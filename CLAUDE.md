@@ -759,6 +759,72 @@ curl -H "Origin: http://52.20.22.173" \
 - ✅ Old ALB URLs: Completely removed (0 references)
 - ✅ NextAuth providers: Working
 
+#### **Critical Nginx Routing Fix (July 21, 2025)**
+
+**Problem Resolved**: Demo credentials not working after deployment due to nginx misconfiguration
+
+**Root Cause**: Nginx was routing Django authentication endpoints (`/api/auth/login/`) to NextAuth frontend instead of Django backend, causing authentication to fail with "This action with HTTP POST is not supported by NextAuth.js" error.
+
+**Critical Issue**: This fix was repeatedly lost during backend deployments because the correct nginx configuration wasn't preserved in the repository.
+
+**Critical Fixes Applied**:
+
+1. **Nginx Route Priority Fix** - Fixed nginx location block ordering:
+   ```nginx
+   # CRITICAL FIX: Django Auth API endpoints - MUST come before NextAuth
+   location /api/auth/login/ {
+       proxy_pass http://127.0.0.1:8000;  # Django backend
+   }
+   
+   location /api/auth/refresh/ {
+       proxy_pass http://127.0.0.1:8000;  # Django backend  
+   }
+   
+   # NextAuth API routes - for NextAuth internal routes only
+   location /api/auth/ {
+       proxy_pass http://127.0.0.1:3000;  # Frontend NextAuth
+   }
+   ```
+
+2. **Dynamic Environment Detection** - Frontend now auto-detects environment:
+   ```javascript
+   // Frontend automatically detects and uses correct backend URL
+   // Local: http://localhost:8000
+   // Dev: http://52.20.22.173 (nginx proxy port 80, not 8000)
+   ```
+
+3. **Repository Configuration Management**:
+   - **Corrected**: `nginx-dev.conf` with working configuration copied from EC2
+   - **Removed**: 7 obsolete nginx configuration files
+   - **Updated**: `deploy_dev.sh` to only use corrected configuration
+   - **Prevention**: Deployment fails if correct config is missing
+
+4. **Backend CORS Update**: Updated to support both environments:
+   ```bash
+   CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://52.20.22.173:3000,http://52.20.22.173
+   ```
+
+**Commits Applied**:
+- Frontend: `6cb8dc4` - "feat: Add dynamic environment detection for both local and dev access"
+- Frontend: `7e025f1` - "fix: Use nginx proxy port 80 for dev environment backend" 
+- Backend: `41646f1` - "fix: Add corrected nginx configuration and cleanup obsolete configs"
+
+**Critical Discovery**: Dev environment uses nginx proxy on port 80, NOT direct backend access on port 8000
+
+**Prevention Measures Implemented**:
+- ✅ **Single Source of Truth**: Only `nginx-dev.conf` exists for dev environment
+- ✅ **Deployment Validation**: Script fails if correct config is missing
+- ✅ **Repository Cleanup**: All obsolete nginx configs removed
+- ✅ **Auto-Detection**: Frontend works in both local and dev without manual config changes
+
+**Verification Results**:
+- ✅ **Demo Login**: `admin / admin123` works in both environments
+- ✅ **Local Access**: `http://localhost:3000` - Working
+- ✅ **Dev Access**: `http://52.20.22.173:3000` - Working
+- ✅ **Django Auth**: `/api/auth/login/` → Django backend ✅
+- ✅ **NextAuth**: `/api/auth/` (others) → Frontend ✅
+- ✅ **Configuration Persistence**: Fix preserved in future deployments
+
 #### **Previous Authentication Fix (July 2024)**
 
 **Problem Resolved**: 401 Unauthorized errors in development environment
@@ -813,6 +879,9 @@ curl -H "Origin: http://52.20.22.173" \
 3. **Frontend requires complete rebuild** when environment variables change (not just restart)
 4. **Always test SSH connection** with correct key before troubleshooting
 5. **Backend service binding** must be `0.0.0.0:8000` for external access
+6. **CRITICAL: Nginx route priority matters** - Django auth routes MUST come before NextAuth routes
+7. **Dev environment uses nginx proxy** - backend accessible on port 80, not 8000 directly
+8. **Always preserve nginx fixes in repository** - copy working configs from EC2 to prevent loss
 
 ### Common Pitfalls & Solutions
 
@@ -824,6 +893,9 @@ curl -H "Origin: http://52.20.22.173" \
 - ❌ Assuming runtime environment variables work for Next.js `NEXT_PUBLIC_*` variables
 - ❌ Not rebuilding frontend after environment variable changes
 - ❌ Testing authentication without verifying build URLs first
+- ❌ **CRITICAL**: Putting NextAuth `/api/auth/` route before Django auth routes in nginx
+- ❌ Assuming dev backend is accessible on port 8000 (uses nginx proxy port 80)
+- ❌ Not preserving nginx configuration fixes in repository (causes repeated failures)
 
 **✅ CORRECT APPROACHES**:
 - ✅ Hardcode dev URLs in GitHub Actions workflow (not secrets)
@@ -831,6 +903,9 @@ curl -H "Origin: http://52.20.22.173" \
 - ✅ Backend systemd service binds to `0.0.0.0:8000`
 - ✅ Update workflow → Deploy → Verify build URLs → Test authentication
 - ✅ Check for ALB URL references in build: `grep -r 'academic-saas-dev' .next/`
+- ✅ **CRITICAL**: Django auth routes (`/api/auth/login/`, `/api/auth/refresh/`) BEFORE NextAuth routes
+- ✅ Use nginx proxy URLs for dev environment (port 80, not 8000)
+- ✅ Copy working nginx configs from EC2 to repository immediately after fixes
 - ✅ Test complete authentication flow after every deployment
 - ✅ Verify environment variables match across all deployment files
 
