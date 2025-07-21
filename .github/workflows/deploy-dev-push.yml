@@ -129,7 +129,17 @@ jobs:
             echo "Using Python: $PYTHON_CMD"
             $PYTHON_CMD --version
             
-            # Install Python dependencies (skip if already installed recently)
+            # Crear y activar entorno virtual
+            python3 -m venv venv
+            source venv/bin/activate
+            
+            # Instalar dependencias usando el pip del entorno virtual
+            ./venv/bin/pip install --upgrade pip
+            ./venv/bin/pip install -r requirements.txt
+            
+            # Usar el python del entorno virtual para todo
+            PYTHON_CMD=./venv/bin/python
+            
             echo "📦 Instalando dependencias..."
             
             # Install build dependencies based on OS
@@ -138,8 +148,6 @@ jobs:
             else
               sudo apt install -y build-essential python3-dev lsof
             fi
-            
-            $PYTHON_CMD -m pip install -r requirements.txt --quiet
             
             # Verify critical dependencies
             echo "🔍 Verifying critical dependencies..."
@@ -234,7 +242,9 @@ jobs:
             echo "🔄 Ejecutando migraciones..."
             $PYTHON_CMD manage.py migrate || { 
               echo "\u274c Migration failed, checking database connection:"
-              echo "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings'); import django; django.setup(); from django.db import connection;\ntry:\n    cursor = connection.cursor(); cursor.execute('SELECT 1'); print('✅ Database connection successful')\nexcept Exception as e:\n    print(f'❌ Database connection failed: {e}')" | $PYTHON_CMD
+              echo 'import os\nos.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")\nimport django\ndjango.setup()\nfrom django.db import connection\ntry:\n    cursor = connection.cursor()\n    cursor.execute("SELECT 1")\n    print("✅ Database connection successful")\nexcept Exception as e:\n    print(f"❌ Database connection failed: {e}")' > check_db.py
+              $PYTHON_CMD check_db.py
+              rm check_db.py
               exit 1; 
             }
             
