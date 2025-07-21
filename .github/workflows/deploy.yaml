@@ -36,54 +36,55 @@ jobs:
             export AWS_STORAGE_BUCKET_NAME=${{ secrets.AWS_STORAGE_BUCKET_NAME_DEV }}
             
             cd /home/ec2-user
-            echo "Removing previous deployment..."
+            echo "Eliminando despliegue anterior..."
             sudo rm -rf academic-saas-backend
             
-            echo "Cloning backend repository (PR branch: ${{ github.event.pull_request.head.ref }})..."
+            echo "Clonando repositorio backend (PR branch: ${{ github.event.pull_request.head.ref }})..."
             git clone --depth 1 --branch ${{ github.event.pull_request.head.ref }} --single-branch https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository_owner }}/academic-saas-backend.git academic-saas-backend
             
             cd academic-saas-backend
             
-            echo "Setting up Python virtual environment..."
+            echo "Creando entorno virtual..."
             python3 -m venv venv
             source venv/bin/activate
             
-            echo "Upgrading pip..."
-            pip install --upgrade pip
+            echo "Actualizando pip..."
+            venv/bin/pip install --upgrade pip
             
-            echo "Installing dependencies with pip..."
-            pip install -r requirements.txt
+            echo "Instalando dependencias..."
+            venv/bin/pip install -r requirements.txt
             
-            echo "Running migrations..."
-            python manage.py migrate
+            echo "Verificando dependencias críticas..."
+            venv/bin/pip show django psycopg2-binary gunicorn || (echo "❌ Faltan dependencias críticas" && exit 1)
             
-            echo "Collecting static files..."
-            python manage.py collectstatic --noinput
+            echo "Ejecutando migraciones..."
+            venv/bin/python manage.py migrate
             
-            echo "Stopping existing Django processes..."
+            echo "Recopilando archivos estáticos..."
+            venv/bin/python manage.py collectstatic --noinput
+            
+            echo "Deteniendo procesos Django previos..."
             pkill -f "manage.py runserver" || true
             pkill -f "gunicorn" || true
             sleep 5
             
-            echo "Starting Django application with Gunicorn..."
-            gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
+            echo "Iniciando aplicación Django con Gunicorn..."
+            venv/bin/gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
             
-            echo "Waiting for application to start..."
+            echo "Esperando a que la aplicación inicie..."
             sleep 15
             
-            echo "Verifying deployment..."
+            echo "Verificando despliegue..."
             if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-              echo "\u2705 Backend deployed successfully in DEV!"
+              echo "✅ Backend desplegado correctamente en DEV!"
             else
-              echo "\u274c Error: Application not responding"
-              echo "Checking if Gunicorn is running..."
+              echo "❌ Error: La aplicación no responde"
               ps aux | grep gunicorn || true
-              echo "Checking if port 8000 is open..."
               netstat -tlnp | grep :8000 || true
               exit 1
             fi
             
-            echo "DEV backend deployment finished."
+            echo "Despliegue DEV finalizado."
 
   # Deploy to production environment
   deploy_prod:
