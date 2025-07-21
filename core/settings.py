@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "apps.users",
     "apps.academic",
     "apps.dashboard",
+    "apps.reports",
     
     "django.contrib.admin",
     "django.contrib.auth",
