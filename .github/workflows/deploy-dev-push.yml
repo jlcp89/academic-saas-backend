@@ -242,22 +242,42 @@ jobs:
               exit 1; 
             }
             
-            echo "👤 Creando superusuario Django..."
+            echo "👤 Creando/actualizando superusuario Django..."
             $PYTHON_CMD manage.py shell << 'EOF'
             from apps.users.models import User
             from apps.organizations.models import School
             
-            if not User.objects.filter(username='admin').exists():
-                # Crear escuela demo si no existe
-                school, created = School.objects.get_or_create(name='Demo School')
-                if created:
-                    print("Escuela demo creada")
-                
-                # Crear superusuario
-                User.objects.create_superuser('admin', 'admin@example.com', 'admin123', school=school)
-                print("Superusuario creado: admin / admin123")
+            # Crear escuela demo si no existe
+            school, created = School.objects.get_or_create(name='Demo School')
+            if created:
+                print("Escuela demo creada")
+            
+            # Crear o actualizar superusuario
+            admin_user, user_created = User.objects.get_or_create(
+                username='admin',
+                defaults={
+                    'email': 'admin@example.com',
+                    'is_superuser': True,
+                    'is_staff': True,
+                    'role': User.Role.SUPERADMIN,
+                    'school': school
+                }
+            )
+            
+            if user_created:
+                admin_user.set_password('admin123')
+                admin_user.save()
+                print("✅ Superusuario creado: admin / admin123")
             else:
-                print("Superusuario ya existe: admin / admin123")
+                # Usuario existe, verificar y actualizar role si es necesario
+                if not admin_user.role or admin_user.role == '':
+                    admin_user.role = User.Role.SUPERADMIN
+                    admin_user.is_superuser = True
+                    admin_user.is_staff = True
+                    admin_user.save()
+                    print("✅ Role de admin actualizado a SUPERADMIN")
+                else:
+                    print("✅ Superusuario ya existe con role correcto: admin / admin123")
             EOF
             
             echo "📁 Recolectando archivos estáticos..."
