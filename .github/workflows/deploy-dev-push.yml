@@ -156,33 +156,32 @@ jobs:
             
             # Only try to clean if port is actually in use
             if [ "$PORT_IN_USE" = true ]; then
-              # Create a script to handle the cleanup
-              cat > /tmp/cleanup_port.sh << 'CLEANUP_SCRIPT'
-#!/bin/bash
-# Get PIDs using port 8000
-PIDS=\$(sudo lsof -ti:8000 2>/dev/null)
-if [ ! -z "\$PIDS" ]; then
-  for PID in \$PIDS; do
-    echo "Stopping process \$PID..."
-    sudo kill -TERM \$PID 2>/dev/null || true
-  done
-  sleep 2
-  # Check again and force kill if needed
-  PIDS=\$(sudo lsof -ti:8000 2>/dev/null)
-  if [ ! -z "\$PIDS" ]; then
-    for PID in \$PIDS; do
-      echo "Force killing process \$PID..."
-      sudo kill -KILL \$PID 2>/dev/null || true
-    done
-  fi
-fi
-exit 0
-CLEANUP_SCRIPT
+              # Kill processes using port 8000 with proper error handling
+              echo "Cleaning up processes on port 8000..."
               
-              chmod +x /tmp/cleanup_port.sh
-              # Run cleanup script and ignore any exit codes
-              sudo bash /tmp/cleanup_port.sh || true
-              rm -f /tmp/cleanup_port.sh
+              # First attempt - graceful termination
+              for i in 1 2 3; do
+                PIDS=$(sudo lsof -ti:8000 2>/dev/null || echo "")
+                if [ -z "$PIDS" ]; then
+                  echo "Port 8000 is now free"
+                  break
+                fi
+                
+                for PID in $PIDS; do
+                  echo "Stopping process $PID (attempt $i)..."
+                  sudo kill -TERM $PID 2>/dev/null || true
+                done
+                sleep 2
+              done
+              
+              # Final attempt - force kill if still running
+              PIDS=$(sudo lsof -ti:8000 2>/dev/null || echo "")
+              if [ ! -z "$PIDS" ]; then
+                echo "Force killing remaining processes..."
+                for PID in $PIDS; do
+                  sudo kill -KILL $PID 2>/dev/null || true
+                done
+              fi
             fi
             
             echo "✅ Limpieza completada"
