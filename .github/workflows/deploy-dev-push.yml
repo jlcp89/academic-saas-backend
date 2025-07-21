@@ -133,39 +133,57 @@ jobs:
             
             echo "🛑 Limpieza completa de procesos existentes..."
             
-            # Wrap entire cleanup in a function to isolate exit codes
-            cleanup_services() {
-              # Stop existing systemd service first
+            # Stop existing systemd service if it exists
+            if sudo systemctl list-unit-files | grep -q academic-backend.service; then
+              echo "Stopping existing academic-backend service..."
               sudo systemctl stop academic-backend 2>/dev/null || true
               sudo systemctl disable academic-backend 2>/dev/null || true
-              
-              # Remove existing service file to avoid conflicts
-              sudo rm -f /etc/systemd/system/academic-backend.service || true
-              sudo systemctl daemon-reload
-              
-              # Kill any remaining processes on port 8000
-              echo "🔍 Limpiando puerto 8000..."
-              
-              # Kill all gunicorn processes - wrap in subshell to prevent exit code issues
-              ( sudo pkill -f "gunicorn.*8000" 2>/dev/null || true ) &
-              wait $! 2>/dev/null || true
-              
-              # Give processes time to stop
-              sleep 3
-              
-              # Check and force kill if needed
-              if sudo lsof -ti:8000 >/dev/null 2>&1; then
-                echo "Port 8000 still in use, force cleaning..."
-                ( sudo lsof -ti:8000 | xargs -r sudo kill -9 2>/dev/null || true ) &
-                wait $! 2>/dev/null || true
-              fi
-              
-              echo "Port 8000 cleanup completed"
-              return 0
-            }
+            fi
             
-            # Execute cleanup and ensure it always returns success
-            cleanup_services || true
+            # Remove existing service file to avoid conflicts
+            sudo rm -f /etc/systemd/system/academic-backend.service || true
+            sudo systemctl daemon-reload || true
+            
+            # Check if any process is using port 8000 before trying to kill
+            echo "🔍 Checking puerto 8000..."
+            PORT_IN_USE=false
+            if sudo lsof -i:8000 -t >/dev/null 2>&1; then
+              PORT_IN_USE=true
+              echo "Port 8000 is in use, cleaning up..."
+            else
+              echo "Port 8000 is free"
+            fi
+            
+            # Only try to clean if port is actually in use
+            if [ "$PORT_IN_USE" = true ]; then
+              # Create a script to handle the cleanup
+              cat > /tmp/cleanup_port.sh << 'CLEANUP_SCRIPT'
+#!/bin/bash
+# Get PIDs using port 8000
+PIDS=$(sudo lsof -ti:8000 2>/dev/null)
+if [ ! -z "$PIDS" ]; then
+  for PID in $PIDS; do
+    echo "Stopping process $PID..."
+    sudo kill -TERM $PID 2>/dev/null || true
+  done
+  sleep 2
+  # Check again and force kill if needed
+  PIDS=$(sudo lsof -ti:8000 2>/dev/null)
+  if [ ! -z "$PIDS" ]; then
+    for PID in $PIDS; do
+      echo "Force killing process $PID..."
+      sudo kill -KILL $PID 2>/dev/null || true
+    done
+  fi
+fi
+exit 0
+CLEANUP_SCRIPT
+              
+              chmod +x /tmp/cleanup_port.sh
+              # Run cleanup script and ignore any exit codes
+              sudo bash /tmp/cleanup_port.sh || true
+              rm -f /tmp/cleanup_port.sh
+            fi
             
             echo "✅ Limpieza completada"
             
