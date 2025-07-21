@@ -133,39 +133,39 @@ jobs:
             
             echo "🛑 Limpieza completa de procesos existentes..."
             
-            # Stop existing systemd service first
-            sudo systemctl stop academic-backend || true
-            sudo systemctl disable academic-backend || true
-            
-            # Remove existing service file to avoid conflicts
-            sudo rm -f /etc/systemd/system/academic-backend.service || true
-            sudo systemctl daemon-reload
-            
-            # Kill any remaining processes on port 8000
-            echo "🔍 Limpiando puerto 8000..."
-            
-            # First, try to stop gunicorn processes gracefully
-            if pgrep -f "gunicorn.*8000" > /dev/null 2>&1; then
-              echo "Stopping gunicorn processes..."
-              sudo pkill -f "gunicorn.*8000" || true
-              sleep 2
-            fi
-            
-            # Then check if port is still in use and kill processes if needed
-            if sudo lsof -ti:8000 > /dev/null 2>&1; then
-              echo "Port 8000 still in use, cleaning up..."
-              for pid in $(sudo lsof -ti:8000); do
-                sudo kill -15 "$pid" 2>/dev/null || true
-              done
-              sleep 2
+            # Wrap entire cleanup in a function to isolate exit codes
+            cleanup_services() {
+              # Stop existing systemd service first
+              sudo systemctl stop academic-backend 2>/dev/null || true
+              sudo systemctl disable academic-backend 2>/dev/null || true
               
-              # Force kill if still running
-              for pid in $(sudo lsof -ti:8000 2>/dev/null); do
-                sudo kill -9 "$pid" 2>/dev/null || true
-              done
-            fi
+              # Remove existing service file to avoid conflicts
+              sudo rm -f /etc/systemd/system/academic-backend.service || true
+              sudo systemctl daemon-reload
+              
+              # Kill any remaining processes on port 8000
+              echo "🔍 Limpiando puerto 8000..."
+              
+              # Kill all gunicorn processes - wrap in subshell to prevent exit code issues
+              ( sudo pkill -f "gunicorn.*8000" 2>/dev/null || true ) &
+              wait $! 2>/dev/null || true
+              
+              # Give processes time to stop
+              sleep 3
+              
+              # Check and force kill if needed
+              if sudo lsof -ti:8000 >/dev/null 2>&1; then
+                echo "Port 8000 still in use, force cleaning..."
+                ( sudo lsof -ti:8000 | xargs -r sudo kill -9 2>/dev/null || true ) &
+                wait $! 2>/dev/null || true
+              fi
+              
+              echo "Port 8000 cleanup completed"
+              return 0
+            }
             
-            echo "Port 8000 cleanup completed"
+            # Execute cleanup and ensure it always returns success
+            cleanup_services || true
             
             echo "✅ Limpieza completada"
             
