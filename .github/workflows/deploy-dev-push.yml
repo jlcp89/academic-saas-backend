@@ -160,19 +160,19 @@ jobs:
               cat > /tmp/cleanup_port.sh << 'CLEANUP_SCRIPT'
 #!/bin/bash
 # Get PIDs using port 8000
-PIDS=$(sudo lsof -ti:8000 2>/dev/null)
-if [ ! -z "$PIDS" ]; then
-  for PID in $PIDS; do
-    echo "Stopping process $PID..."
-    sudo kill -TERM $PID 2>/dev/null || true
+PIDS=\$(sudo lsof -ti:8000 2>/dev/null)
+if [ ! -z "\$PIDS" ]; then
+  for PID in \$PIDS; do
+    echo "Stopping process \$PID..."
+    sudo kill -TERM \$PID 2>/dev/null || true
   done
   sleep 2
   # Check again and force kill if needed
-  PIDS=$(sudo lsof -ti:8000 2>/dev/null)
-  if [ ! -z "$PIDS" ]; then
-    for PID in $PIDS; do
-      echo "Force killing process $PID..."
-      sudo kill -KILL $PID 2>/dev/null || true
+  PIDS=\$(sudo lsof -ti:8000 2>/dev/null)
+  if [ ! -z "\$PIDS" ]; then
+    for PID in \$PIDS; do
+      echo "Force killing process \$PID..."
+      sudo kill -KILL \$PID 2>/dev/null || true
     done
   fi
 fi
