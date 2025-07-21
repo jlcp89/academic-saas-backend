@@ -74,6 +74,36 @@ if ! command -v nginx &> /dev/null; then
     sudo systemctl enable nginx
 fi
 
+# ================================================================
+# CONFIGURACIÓN DE NGINX
+# ================================================================
+
+log_info "🌐 Configurando Nginx..."
+
+# Hacer backup de la configuración existente
+if [ -f /etc/nginx/nginx.conf ]; then
+    sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup-$(date +%Y%m%d-%H%M%S)
+fi
+
+# Copiar configuración de nginx corregida para NextAuth
+if [ -f "nginx-dev-nextauth-fixed.conf" ]; then
+    log_info "Aplicando configuración de nginx corregida (NextAuth fix)..."
+    sudo cp nginx-dev-nextauth-fixed.conf /etc/nginx/nginx.conf
+elif [ -f "nginx-dev.conf" ]; then
+    log_info "Aplicando configuración de nginx de desarrollo..."
+    sudo cp nginx-dev.conf /etc/nginx/nginx.conf
+else
+    log_warning "No se encontró configuración de nginx personalizada, usando configuración por defecto"
+fi
+
+# Validar configuración de nginx
+if sudo nginx -t; then
+    log_success "✅ Configuración de nginx válida"
+else
+    log_error "❌ Error en configuración de nginx"
+    exit 1
+fi
+
 # Verificar Poetry
 if ! command -v poetry &> /dev/null; then
     log_info "Poetry no está instalado. Instalando..."
@@ -199,21 +229,47 @@ log_info "🚀 Iniciando servicio backend..."
 sudo systemctl start academic-saas-backend
 
 # ================================================================
+# INICIAR NGINX
+# ================================================================
+
+log_info "🌐 Iniciando nginx..."
+sudo systemctl restart nginx
+
+# Verificar que nginx esté funcionando
+if sudo systemctl is-active --quiet nginx; then
+    log_success "✅ Nginx iniciado correctamente"
+else
+    log_error "❌ Error: Nginx no pudo iniciarse"
+    sudo systemctl status nginx
+    exit 1
+fi
+
+# ================================================================
 # VERIFICACIÓN
 # ================================================================
 
 log_info "⏳ Esperando que la aplicación esté lista..."
 sleep 10
 
-# Verificar que la aplicación responda
+# Verificar que la aplicación responda directamente (puerto 8000)
 if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-    log_success "✅ Backend desplegado exitosamente!"
-    log_info "🌐 URL: http://52.20.22.173:8000"
-    log_info "🔧 Admin: http://52.20.22.173:8000/admin"
+    log_success "✅ Backend responde en puerto 8000"
 else
-    log_error "❌ Error: La aplicación no responde en puerto 8000"
-    pm2 logs academic-saas-backend --lines 20
+    log_error "❌ Error: Backend no responde en puerto 8000"
+    sudo systemctl status academic-saas-backend
     exit 1
+fi
+
+# Verificar que nginx proxy funcione (puerto 80)
+if curl -f http://localhost/admin/login/ > /dev/null 2>&1; then
+    log_success "✅ Nginx proxy funcionando correctamente"
+    log_info "🌐 Acceso principal: http://52.20.22.173"
+    log_info "🔧 Admin: http://52.20.22.173/admin"
+    log_info "🔧 Backend directo: http://52.20.22.173:8000"
+else
+    log_warning "⚠️ Nginx proxy no responde, pero backend funciona directamente"
+    log_info "🌐 URL directa: http://52.20.22.173:8000"
+    log_info "🔧 Admin: http://52.20.22.173:8000/admin"
 fi
 
 # ================================================================
@@ -221,10 +277,14 @@ fi
 # ================================================================
 
 log_success "🎉 ¡Deployment completado!"
-log_info "=========================="
-log_info "🌐 URLs de acceso:"
-log_info "   • Backend API:   http://52.20.22.173:8000"
-log_info "   • Django Admin:  http://52.20.22.173:8000/admin/"
+log_info "======================================"
+log_info "🌐 URLs de acceso (Nginx Proxy):"
+log_info "   • Aplicación:    http://52.20.22.173"
+log_info "   • Backend API:   http://52.20.22.173/api/"
+log_info "   • Django Admin:  http://52.20.22.173/admin/"
+log_info ""
+log_info "🔧 URLs directas (desarrollo):"
+log_info "   • Backend:       http://52.20.22.173:8000"
 log_info "   • API Docs:      http://52.20.22.173:8000/api/docs/"
 log_info ""
 log_info "🔑 Credenciales:"
@@ -232,8 +292,9 @@ log_info "   • Usuario:       admin"
 log_info "   • Contraseña:    admin123"
 log_info ""
 log_info "📋 Comandos útiles:"
-log_info "   • pm2 status                    # Ver estado de procesos"
-log_info "   • pm2 logs academic-saas-backend   # Ver logs"
-log_info "   • pm2 restart academic-saas-backend   # Reiniciar aplicación"
-log_info "   • pm2 stop academic-saas-backend      # Detener aplicación"
+log_info "   • sudo systemctl status academic-saas-backend   # Estado backend"
+log_info "   • sudo systemctl status nginx                   # Estado nginx"
+log_info "   • sudo systemctl restart academic-saas-backend  # Reiniciar backend"
+log_info "   • sudo systemctl restart nginx                  # Reiniciar nginx"
+log_info "   • sudo nginx -t                                 # Validar config nginx"
 log_info "   • ./deploy_dev.sh --force-deps # Reinstalar dependencias"
