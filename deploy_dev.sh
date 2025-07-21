@@ -85,15 +85,13 @@ if [ -f /etc/nginx/nginx.conf ]; then
     sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup-$(date +%Y%m%d-%H%M%S)
 fi
 
-# Copiar configuración de nginx corregida para NextAuth
-if [ -f "nginx-dev-nextauth-fixed.conf" ]; then
-    log_info "Aplicando configuración de nginx corregida (NextAuth fix)..."
-    sudo cp nginx-dev-nextauth-fixed.conf /etc/nginx/nginx.conf
-elif [ -f "nginx-dev.conf" ]; then
-    log_info "Aplicando configuración de nginx de desarrollo..."
+# Copiar configuración de nginx corregida (Django + NextAuth routes fixed)
+if [ -f "nginx-dev.conf" ]; then
+    log_info "Aplicando configuración de nginx corregida (Django auth fix)..."
     sudo cp nginx-dev.conf /etc/nginx/nginx.conf
 else
-    log_warning "No se encontró configuración de nginx personalizada, usando configuración por defecto"
+    log_error "❌ Error: nginx-dev.conf no encontrado. Esta configuración es requerida."
+    exit 1
 fi
 
 # Validar configuración de nginx
