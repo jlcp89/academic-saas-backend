@@ -78,59 +78,13 @@ jobs:
               fi
             fi
             
-            # Install and configure PostgreSQL
-            echo "Setting up PostgreSQL..."
-            if [ "$PKG_MANAGER" = "yum" ]; then
-              sudo yum install -y postgresql postgresql-server postgresql-devel
-            else
-              sudo apt install -y postgresql postgresql-contrib libpq-dev
+            # Instalar python3.8 si no está presente
+            if ! command -v python3.8 &> /dev/null; then
+              sudo yum install -y python38 python38-devel || sudo apt-get install -y python3.8 python3.8-venv python3.8-dev
             fi
             
-            # Initialize and configure PostgreSQL based on OS
-            if [ "$PKG_MANAGER" = "yum" ]; then
-              # Amazon Linux 2 PostgreSQL setup
-              if [ ! -f /var/lib/pgsql/data/postgresql.conf ]; then
-                echo "Initializing PostgreSQL..."
-                sudo $PG_SETUP_CMD
-                
-                # Configure PostgreSQL to accept local connections
-                sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" /var/lib/pgsql/data/postgresql.conf
-                echo "local all all trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
-                echo "host all all 127.0.0.1/32 trust" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
-              fi
-            else
-              # Ubuntu/Debian PostgreSQL setup
-              echo "Configuring PostgreSQL for Ubuntu..."
-              sudo systemctl status postgresql || echo "PostgreSQL service status checked"
-              
-              # Configure PostgreSQL to accept local connections (Ubuntu paths)
-              PG_VERSION=$(sudo -u postgres psql -t -c "SELECT version();" | grep -oP '\d+\.\d+' | head -1)
-              PG_CONFIG_DIR="/etc/postgresql/${PG_VERSION}/main"
-              
-              if [ -d "$PG_CONFIG_DIR" ]; then
-                sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" ${PG_CONFIG_DIR}/postgresql.conf || true
-                sudo sed -i "s/local   all             all                                     peer/local   all             all                                     trust/" ${PG_CONFIG_DIR}/pg_hba.conf || true
-                echo "host all all 127.0.0.1/32 trust" | sudo tee -a ${PG_CONFIG_DIR}/pg_hba.conf || true
-              fi
-            fi
-            
-            # Start PostgreSQL
-            sudo systemctl enable $PG_SERVICE
-            sudo systemctl start $PG_SERVICE
-            
-            # Create database and user with consistent naming
-            sudo -u postgres psql -c "DROP DATABASE IF EXISTS academic_saas_dev;" || true
-            sudo -u postgres psql -c "DROP USER IF EXISTS academic_saas_dev;" || true
-            sudo -u postgres psql -c "CREATE DATABASE academic_saas_dev;"
-            sudo -u postgres psql -c "CREATE USER academic_saas_dev WITH PASSWORD 'dev_password_123';"
-            sudo -u postgres psql -c "ALTER USER academic_saas_dev CREATEDB;"
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE academic_saas_dev TO academic_saas_dev;"
-            
-            echo "Using Python: $PYTHON_CMD"
-            $PYTHON_CMD --version
-            
-            # Crear y activar entorno virtual
-            python3 -m venv venv
+            # Crear entorno virtual con python3.8
+            python3.8 -m venv venv
             source venv/bin/activate
             
             # Instalar dependencias usando el pip del entorno virtual
@@ -242,7 +196,17 @@ jobs:
             echo "🔄 Ejecutando migraciones..."
             $PYTHON_CMD manage.py migrate || { 
               echo "\u274c Migration failed, checking database connection:"
-              echo 'import os\nos.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")\nimport django\ndjango.setup()\nfrom django.db import connection\ntry:\n    cursor = connection.cursor()\n    cursor.execute("SELECT 1")\n    print("✅ Database connection successful")\nexcept Exception as e:\n    print(f"❌ Database connection failed: {e}")' > check_db.py
+              echo 'import os' > check_db.py
+              echo 'os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")' >> check_db.py
+              echo 'import django' >> check_db.py
+              echo 'django.setup()' >> check_db.py
+              echo 'from django.db import connection' >> check_db.py
+              echo 'try:' >> check_db.py
+              echo '    cursor = connection.cursor()' >> check_db.py
+              echo '    cursor.execute("SELECT 1")' >> check_db.py
+              echo '    print("✅ Database connection successful")' >> check_db.py
+              echo 'except Exception as e:' >> check_db.py
+              echo '    print(f"❌ Database connection failed: {e}")' >> check_db.py
               $PYTHON_CMD check_db.py
               rm check_db.py
               exit 1; 
