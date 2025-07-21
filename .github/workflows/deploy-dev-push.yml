@@ -233,20 +233,20 @@ jobs:
             
             echo "🔄 Ejecutando migraciones..."
             $PYTHON_CMD manage.py migrate || { 
-              echo "❌ Migration failed, checking database connection:"
-              $PYTHON_CMD -c "
-              import os
-              os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
-              import django
-              django.setup()
-              from django.db import connection
-              try:
-                  cursor = connection.cursor()
-                  cursor.execute('SELECT 1')
-                  print('✅ Database connection successful')
-              except Exception as e:
-                  print(f'❌ Database connection failed: {e}')
-              "
+              echo "\u274c Migration failed, checking database connection:"
+              $PYTHON_CMD << EOF
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+import django
+django.setup()
+from django.db import connection
+try:
+    cursor = connection.cursor()
+    cursor.execute('SELECT 1')
+    print('✅ Database connection successful')
+except Exception as e:
+    print(f'❌ Database connection failed: {e}')
+EOF
               exit 1; 
             }
             

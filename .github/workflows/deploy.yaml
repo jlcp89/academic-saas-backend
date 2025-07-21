@@ -44,21 +44,21 @@ jobs:
             
             cd academic-saas-backend
             
-            echo "Installing Poetry if not present..."
-            if ! command -v poetry &> /dev/null; then
-              curl -sSL https://install.python-poetry.org | python3 -
-            fi
-            # Ensure Poetry is in PATH
-            export PATH="$HOME/.local/bin:$PATH"
+            echo "Setting up Python virtual environment..."
+            python3 -m venv venv
+            source venv/bin/activate
             
-            echo "Installing dependencies..."
-            poetry install --only=main --no-dev
+            echo "Upgrading pip..."
+            pip install --upgrade pip
+            
+            echo "Installing dependencies with pip..."
+            pip install -r requirements.txt
             
             echo "Running migrations..."
-            poetry run python manage.py migrate
+            python manage.py migrate
             
             echo "Collecting static files..."
-            poetry run python manage.py collectstatic --noinput
+            python manage.py collectstatic --noinput
             
             echo "Stopping existing Django processes..."
             pkill -f "manage.py runserver" || true
@@ -66,16 +66,16 @@ jobs:
             sleep 5
             
             echo "Starting Django application with Gunicorn..."
-            poetry run gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
+            gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
             
             echo "Waiting for application to start..."
             sleep 15
             
             echo "Verifying deployment..."
             if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-              echo "✅ Backend deployed successfully in DEV!"
+              echo "\u2705 Backend deployed successfully in DEV!"
             else
-              echo "❌ Error: Application not responding"
+              echo "\u274c Error: Application not responding"
               echo "Checking if Gunicorn is running..."
               ps aux | grep gunicorn || true
               echo "Checking if port 8000 is open..."
@@ -124,21 +124,21 @@ jobs:
             
             cd academic-saas-backend
             
-            echo "Installing Poetry if not present..."
-            if ! command -v poetry &> /dev/null; then
-              curl -sSL https://install.python-poetry.org | python3 -
-            fi
-            # Ensure Poetry is in PATH
-            export PATH="$HOME/.local/bin:$PATH"
+            echo "Setting up Python virtual environment..."
+            python3 -m venv venv
+            source venv/bin/activate
             
-            echo "Installing dependencies..."
-            poetry install --only=main --no-dev
+            echo "Upgrading pip..."
+            pip install --upgrade pip
+            
+            echo "Installing dependencies with pip..."
+            pip install -r requirements.txt
             
             echo "Running migrations..."
-            poetry run python manage.py migrate
+            python manage.py migrate
             
             echo "Collecting static files..."
-            poetry run python manage.py collectstatic --noinput
+            python manage.py collectstatic --noinput
             
             echo "Stopping existing Django processes..."
             pkill -f "manage.py runserver" || true
@@ -146,16 +146,16 @@ jobs:
             sleep 5
             
             echo "Starting Django application with Gunicorn..."
-            poetry run gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
+            gunicorn core.wsgi:application --bind 0.0.0.0:8000 --daemon --pid /tmp/gunicorn.pid
             
             echo "Waiting for application to start..."
             sleep 15
             
             echo "Health check..."
             if curl -f http://localhost:8000/admin/login/ > /dev/null 2>&1; then
-              echo "✅ Backend deployed successfully in PRODUCTION!"
+              echo "\u2705 Backend deployed successfully in PRODUCTION!"
             else
-              echo "❌ Health check failed"
+              echo "\u274c Health check failed"
               echo "Checking if Gunicorn is running..."
               ps aux | grep gunicorn || true
               echo "Checking if port 8000 is open..."
