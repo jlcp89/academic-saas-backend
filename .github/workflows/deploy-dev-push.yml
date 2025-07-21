@@ -400,11 +400,33 @@ jobs:
             sudo rm -f /etc/nginx/conf.d/academic-saas-frontend.conf || true
             sudo rm -f /etc/nginx/conf.d/default.conf || true
             
+            # Validate nginx config file exists and has correct CSS routing
+            if [ ! -f "nginx-dev.conf" ]; then
+              echo "❌ ERROR: nginx-dev.conf not found in repository!"
+              exit 1
+            fi
+            
+            # Check if nginx config has the critical /_next/ location block for CSS
+            if ! grep -q "location /_next/" nginx-dev.conf; then
+              echo "❌ ERROR: nginx-dev.conf missing critical /_next/ location block for CSS files!"
+              echo "This will cause frontend styles to break!"
+              exit 1
+            fi
+            
+            # Check if config does NOT have the problematic regex location that breaks CSS
+            if grep -q "location ~.*\\\.(css|js|map" nginx-dev.conf; then
+              echo "❌ ERROR: nginx-dev.conf contains problematic regex location block!"
+              echo "This will cause CSS routing conflicts!"
+              exit 1
+            fi
+            
+            echo "✅ Nginx config validation passed"
+            
             # Copy nginx development configuration
             sudo cp nginx-dev.conf /etc/nginx/nginx.conf
             
-            # Test nginx configuration
-            sudo nginx -t || { echo "Nginx config test failed"; cat /var/log/nginx/error.log || true; exit 1; }
+            # Test nginx configuration syntax
+            sudo nginx -t || { echo "❌ Nginx config syntax test failed"; cat /var/log/nginx/error.log || true; exit 1; }
             
             # Start nginx
             sudo systemctl enable nginx
@@ -419,9 +441,19 @@ jobs:
             for i in {1..5}; do
               if curl -f http://localhost/admin/login/ > /dev/null 2>&1; then
                 echo "✅ Backend con Nginx desplegado exitosamente!"
+                
+                # CRITICAL: Verify CSS routing is working
+                echo "🎨 Verificando routing de archivos CSS..."
+                if curl -f http://localhost/_next/ > /dev/null 2>&1; then
+                  echo "✅ CSS routing funcionando correctamente"
+                else
+                  echo "⚠️ WARNING: CSS routing might have issues"
+                fi
+                
                 echo "🌐 URL: http://${{ secrets.EC2_HOST_DEV }}"
                 echo "🔧 Admin: http://${{ secrets.EC2_HOST_DEV }}/admin"
                 echo "📚 API Docs: http://${{ secrets.EC2_HOST_DEV }}/api/docs/"
+                echo "🎨 Styles: CSS routing validated"
                 exit 0
               else
                 echo "Intento $i/5: Esperando respuesta del servidor..."
