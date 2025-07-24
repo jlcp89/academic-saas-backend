@@ -9,6 +9,6 @@ class User(AbstractUser):
         PROFESSOR = 'PROFESSOR', 'Professor'
         STUDENT = 'STUDENT', 'Student'
 
-    role = models.CharField(max_length=10, choices=Role.choices)
+    role = models.CharField(max_length=10, choices=Role.choices, null=False, blank=False)
     
     school = models.ForeignKey(School, on_delete=models.CASCADE, null=True, blank=True)

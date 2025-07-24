@@ -244,14 +244,26 @@ if config('AWS_ACCESS_KEY_ID', default=''):
 # Django Channels configuration for WebSocket support
 ASGI_APPLICATION = 'core.asgi.application'
 
+# Redis configuration for both local and dev environments
+REDIS_HOST = config('REDIS_HOST', default='52.20.22.173')
+REDIS_PORT = config('REDIS_PORT', cast=int, default=6379)
+
+# Celery configuration
+CELERY_BROKER_URL = f'redis://{REDIS_HOST}:{REDIS_PORT}/0'
+CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:{REDIS_PORT}/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+
 # Channel layers configuration using existing Redis
 CHANNEL_LAYERS = {
     'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer' if not DEBUG else 'channels.layers.InMemoryChannelLayer',
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+            "hosts": [(REDIS_HOST, REDIS_PORT)],
             "capacity": 100,  # Limit capacity to save memory
             "expiry": 10,  # Short expiry for cost optimization
-        } if not DEBUG else {},
+        },
     },
 }

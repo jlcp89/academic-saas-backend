@@ -7,6 +7,49 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class TestConsumer(AsyncJsonWebsocketConsumer):
+    """
+    Simple test consumer without authentication for debugging
+    """
+    
+    async def connect(self):
+        """Accept connection without authentication"""
+        logger.info(f"🔌 [WEBSOCKET DEBUG] TestConsumer connect attempt")
+        
+        await self.accept()
+        logger.info(f"✅ [WEBSOCKET DEBUG] TestConsumer connected successfully")
+        
+        # Send a test message
+        await self.send_json({
+            'type': 'test_message',
+            'data': 'WebSocket connection successful!'
+        })
+    
+    async def receive_json(self, content):
+        """Handle incoming WebSocket messages"""
+        logger.info(f"📨 [WEBSOCKET DEBUG] TestConsumer received: {content}")
+        
+        # Echo back the message
+        await self.send_json({
+            'type': 'echo',
+            'data': content
+        })
+    
+    async def disconnect(self, close_code):
+        """Clean up when user disconnects"""
+        logger.info(f"🔌 [WEBSOCKET DEBUG] TestConsumer disconnected with code {close_code}")
+    
+    async def receive_json(self, content):
+        """Handle incoming WebSocket messages"""
+        logger.info(f"📨 [WEBSOCKET DEBUG] TestConsumer received: {content}")
+        
+        # Echo back the message
+        await self.send_json({
+            'type': 'echo',
+            'data': content
+        })
+
+
 class NotificationConsumer(AsyncJsonWebsocketConsumer):
     """
     Lightweight WebSocket consumer for real-time notifications.
@@ -17,7 +60,10 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
         """Accept connection if user is authenticated"""
         self.user = self.scope["user"]
         
+        logger.info(f"🔌 [WEBSOCKET DEBUG] NotificationConsumer connect attempt - User: {self.user}")
+        
         if isinstance(self.user, AnonymousUser):
+            logger.warning(f"❌ [WEBSOCKET DEBUG] Anonymous user rejected")
             await self.close()
             return
         
@@ -29,7 +75,7 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
         )
         
         await self.accept()
-        logger.info(f"User {self.user.username} connected to notifications")
+        logger.info(f"✅ [WEBSOCKET DEBUG] User {self.user.username} connected to notifications")
     
     async def disconnect(self, close_code):
         """Clean up when user disconnects"""
@@ -38,7 +84,7 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
                 self.user_group,
                 self.channel_name
             )
-        logger.info(f"User disconnected with code {close_code}")
+        logger.info(f"🔌 [WEBSOCKET DEBUG] User disconnected with code {close_code}")
     
     async def receive_json(self, content):
         """Handle incoming WebSocket messages"""
@@ -76,14 +122,15 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         self.room_group_name = f'chat_room_{self.room_id}'
         self.user = self.scope["user"]
         
+        logger.info(f"🔌 [WEBSOCKET DEBUG] ChatConsumer connect attempt - Room: {self.room_id}, User: {self.user}")
+        
         if isinstance(self.user, AnonymousUser):
+            logger.warning(f"❌ [WEBSOCKET DEBUG] Anonymous user rejected for room {self.room_id}")
             await self.close()
             return
         
-        # Verify user has access to this room
-        if not await self.user_can_access_room():
-            await self.close()
-            return
+        # TEMPORARIO: Permitir conexión sin verificar sala para pruebas
+        logger.info(f"🔍 [WEBSOCKET DEBUG] User {self.user.username} connecting to room {self.room_id} (bypassing room check for testing)")
         
         # Join room group
         await self.channel_layer.group_add(
@@ -92,6 +139,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         )
         
         await self.accept()
+        logger.info(f"✅ [WEBSOCKET DEBUG] User {self.user.username} connected to room {self.room_id}")
         
         # Notify others that user joined
         await self.channel_layer.group_send(
@@ -105,6 +153,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     
     async def disconnect(self, close_code):
         """Clean up when user leaves room"""
+        logger.info(f"🔌 [WEBSOCKET DEBUG] User {getattr(self, 'user', 'unknown')} disconnected from room {getattr(self, 'room_id', 'unknown')} with code {close_code}")
+        
         if hasattr(self, 'room_group_name'):
             # Notify others that user left
             await self.channel_layer.group_send(
@@ -124,6 +174,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def receive_json(self, content):
         """Handle incoming messages"""
         message_type = content.get('type')
+        logger.info(f"📨 [WEBSOCKET DEBUG] Received message type: {message_type}")
         
         if message_type == 'typing_start':
             await self.handle_typing_start()
@@ -197,6 +248,9 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         from .models import ChatRoom
         try:
             room = ChatRoom.objects.get(id=self.room_id)
-            return room.participants.filter(id=self.user.id).exists()
+            is_participant = room.participants.filter(id=self.user.id).exists()
+            logger.info(f"🔍 [WEBSOCKET DEBUG] Room {self.room_id} exists: {room.name}, User {self.user.username} is participant: {is_participant}")
+            return is_participant
         except ChatRoom.DoesNotExist:
+            logger.warning(f"❌ [WEBSOCKET DEBUG] Room {self.room_id} does not exist")
             return False

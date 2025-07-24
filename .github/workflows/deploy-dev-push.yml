@@ -202,6 +202,10 @@ jobs:
             DEBUG=True
             ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}
             CORS_ALLOWED_ORIGINS=http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}
+            REDIS_HOST=localhost
+            REDIS_PORT=6379
+            CELERY_BROKER_URL=redis://localhost:6379/0
+            CELERY_RESULT_BACKEND=redis://localhost:6379/0
             EOF
             
             echo "✅ Variables de entorno configuradas"
@@ -218,6 +222,10 @@ jobs:
             export DEBUG=True
             export ALLOWED_HOSTS="localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
             export CORS_ALLOWED_ORIGINS="http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}"
+            export REDIS_HOST=localhost
+            export REDIS_PORT=6379
+            export CELERY_BROKER_URL=redis://localhost:6379/0
+            export CELERY_RESULT_BACKEND=redis://localhost:6379/0
             
             echo "🔍 Verificando variables de entorno:"
             echo "SECRET_KEY length: ${#SECRET_KEY}"
@@ -327,6 +335,10 @@ jobs:
             Environment="DEBUG=True"
             Environment="ALLOWED_HOSTS=localhost,127.0.0.1,${{ secrets.EC2_HOST_DEV }}"
             Environment="CORS_ALLOWED_ORIGINS=http://localhost:3000,http://${{ secrets.EC2_HOST_DEV }}:3000,http://${{ secrets.EC2_HOST_DEV }}"
+            Environment="REDIS_HOST=localhost"
+            Environment="REDIS_PORT=6379"
+            Environment="CELERY_BROKER_URL=redis://localhost:6379/0"
+            Environment="CELERY_RESULT_BACKEND=redis://localhost:6379/0"
             ExecStart=$PYTHON_PATH -m gunicorn --bind 127.0.0.1:8000 --workers 2 core.wsgi:application
             Restart=always
             RestartSec=10
