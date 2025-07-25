@@ -213,38 +213,321 @@ class ChatRoomViewSet(TenantAwareViewSet):
         serializer = UserSerializer(participants, many=True)
         return Response(serializer.data)
     
+    @action(detail=True, methods=['get'])
+    def available_users(self, request, pk=None):
+        """Get list of users that can be added to the chat room based on role permissions"""
+        room = self.get_object()
+        from apps.users.models import User
+        from apps.users.serializers import UserSerializer
+        
+        # Get search parameters
+        search = request.GET.get('search', '').strip()
+        page_size = min(int(request.GET.get('page_size', 20)), 100)  # Max 100 users per page
+        
+        # Get users that current user can add based on role permissions
+        available_users = self._get_available_users_for_role(request.user, room)
+        
+        # Apply search filter if provided
+        if search:
+            available_users = available_users.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search)
+            )
+        
+        # Exclude current participants
+        existing_participant_ids = room.participants.values_list('id', flat=True)
+        available_users = available_users.exclude(id__in=existing_participant_ids)
+        
+        # Exclude the requesting user
+        available_users = available_users.exclude(id=request.user.id)
+        
+        # Order by role hierarchy then by name
+        available_users = available_users.order_by('role', 'first_name', 'last_name', 'username')
+        
+        # Paginate results
+        from django.core.paginator import Paginator
+        paginator = Paginator(available_users, page_size)
+        page = request.GET.get('page', 1)
+        
+        try:
+            users_page = paginator.page(page)
+        except:
+            users_page = paginator.page(1)
+        
+        # Serialize the results
+        serializer = UserSerializer(users_page.object_list, many=True)
+        
+        return Response({
+            'results': serializer.data,
+            'count': paginator.count,
+            'num_pages': paginator.num_pages,
+            'current_page': users_page.number,
+            'has_next': users_page.has_next(),
+            'has_previous': users_page.has_previous(),
+            'permission_info': self._get_permission_info(request.user)
+        })
+    
+    def _get_available_users_for_role(self, requesting_user, room):
+        """Get queryset of users that requesting_user can add to the chat room"""
+        from apps.users.models import User
+        
+        # Students cannot add anyone
+        if requesting_user.role == 'STUDENT':
+            return User.objects.none()
+        
+        # Check if requesting user is the main superadmin "admin"
+        is_main_superadmin = (requesting_user.username == 'admin' and 
+                             requesting_user.role == 'SUPERADMIN')
+        
+        if requesting_user.role == 'SUPERADMIN':
+            if is_main_superadmin:
+                # Main superadmin "admin" can add anyone from any school
+                return User.objects.all()
+            else:
+                # Other superadmins cannot add superadmins, but can add from any school
+                return User.objects.exclude(role='SUPERADMIN')
+                
+        elif requesting_user.role == 'ADMIN':
+            # Admins can only add professors and students from their school
+            return User.objects.filter(
+                school=requesting_user.school,
+                role__in=['PROFESSOR', 'STUDENT']
+            )
+            
+        elif requesting_user.role == 'PROFESSOR':
+            # Professors can only add students from their school
+            return User.objects.filter(
+                school=requesting_user.school,
+                role='STUDENT'
+            )
+        
+        # Default: no users available
+        return User.objects.none()
+    
+    def _get_permission_info(self, requesting_user):
+        """Get information about what types of users the requesting user can add"""
+        if requesting_user.role == 'STUDENT':
+            return {
+                'can_add': [],
+                'message': 'Students cannot add users to chats'
+            }
+        
+        is_main_superadmin = (requesting_user.username == 'admin' and 
+                             requesting_user.role == 'SUPERADMIN')
+        
+        if requesting_user.role == 'SUPERADMIN':
+            if is_main_superadmin:
+                return {
+                    'can_add': ['SUPERADMIN', 'ADMIN', 'PROFESSOR', 'STUDENT'],
+                    'message': 'As main system administrator, you can add any user'
+                }
+            else:
+                return {
+                    'can_add': ['ADMIN', 'PROFESSOR', 'STUDENT'],
+                    'message': 'As superadmin, you can add admins, professors, and students'
+                }
+                
+        elif requesting_user.role == 'ADMIN':
+            return {
+                'can_add': ['PROFESSOR', 'STUDENT'],
+                'message': 'As school admin, you can add professors and students from your school'
+            }
+            
+        elif requesting_user.role == 'PROFESSOR':
+            return {
+                'can_add': ['STUDENT'],
+                'message': 'As professor, you can add students from your school'
+            }
+        
+        return {
+            'can_add': [],
+            'message': 'No users can be added'
+        }
+    
     @action(detail=True, methods=['post'])
     def add_participant(self, request, pk=None):
-        """Add a participant to the chat room"""
+        """Add a participant to the chat room with role-based permissions"""
         room = self.get_object()
         user_id = request.data.get('user_id')
         
-        # Only room creator or admin can add participants
-        if room.created_by != request.user and request.user.role not in ['ADMIN', 'SUPERADMIN']:
+        if not user_id:
             return Response(
-                {"error": "Only room creator or admin can add participants"},
-                status=status.HTTP_403_FORBIDDEN
+                {"error": "user_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
             )
         
         try:
             from apps.users.models import User
-            user = User.objects.get(id=user_id, school=request.user.school)
-            room.add_participant(user)
+            
+            # Get the user to be added
+            if request.user.role == 'SUPERADMIN':
+                # Superadmin can add users from any school
+                user_to_add = User.objects.get(id=user_id)
+            else:
+                # Other users can only add users from their own school
+                user_to_add = User.objects.get(id=user_id, school=request.user.school)
+            
+            # Check role-based permissions for adding users
+            permission_error = self._check_add_user_permissions(request.user, user_to_add)
+            if permission_error:
+                return Response(
+                    {"error": permission_error},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Check if user is already a participant
+            if room.participants.filter(id=user_to_add.id).exists():
+                return Response(
+                    {"error": f"{user_to_add.username} is already a participant in this chat"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Add the participant
+            room.add_participant(user_to_add)
+            
+            # Clear cache for this room (for all participants)
+            self._clear_room_cache(room)
             
             # Send system message
             Message.objects.create(
                 room=room,
                 sender=request.user,
-                content=f"{user.username} was added to the chat",
+                content=f"{user_to_add.username} was added to the chat",
                 is_system_message=True
             )
             
-            return Response({"status": "participant added"})
+            # Send notification via WebSocket
+            self._send_participant_added_notification(room, user_to_add, request.user)
+            
+            from apps.users.serializers import UserSerializer
+            return Response({
+                "status": "participant added",
+                "user": UserSerializer(user_to_add).data
+            }, status=status.HTTP_201_CREATED)
+            
         except User.DoesNotExist:
             return Response(
-                {"error": "User not found"},
+                {"error": "User not found or not in your school"},
                 status=status.HTTP_404_NOT_FOUND
             )
+    
+    def _check_add_user_permissions(self, requesting_user, user_to_add):
+        """
+        Check if requesting_user has permission to add user_to_add to chat.
+        Returns error message if permission denied, None if allowed.
+        
+        Permission rules:
+        - Superadmin "admin": Can add other superadmins (main system superadmin)
+        - Superadmins: Can add admins, professors, and students
+        - Admins: Can add professors and students
+        - Professors: Can only add students
+        - Students: Cannot add any users
+        """
+        
+        # Students cannot add anyone
+        if requesting_user.role == 'STUDENT':
+            return "Students are not allowed to add users to chats"
+        
+        # Check if requesting user is the main superadmin "admin"
+        is_main_superadmin = (requesting_user.username == 'admin' and 
+                             requesting_user.role == 'SUPERADMIN')
+        
+        # Permission matrix based on roles
+        if requesting_user.role == 'SUPERADMIN':
+            if is_main_superadmin:
+                # Main superadmin "admin" can add anyone including other superadmins
+                return None
+            else:
+                # Other superadmins cannot add superadmins
+                if user_to_add.role == 'SUPERADMIN':
+                    return "Only the main system administrator can add other superadmins"
+                # Can add admins, professors, and students
+                return None
+                
+        elif requesting_user.role == 'ADMIN':
+            # Admins cannot add superadmins or other admins
+            if user_to_add.role in ['SUPERADMIN', 'ADMIN']:
+                return "School admins can only add professors and students"
+            # Can add professors and students
+            return None
+            
+        elif requesting_user.role == 'PROFESSOR':
+            # Professors can only add students
+            if user_to_add.role != 'STUDENT':
+                return "Professors can only add students to chats"
+            return None
+        
+        # Should not reach here, but safety check
+        return "Insufficient permissions"
+    
+    def _clear_room_cache(self, room):
+        """Clear cache for all participants in a room"""
+        try:
+            # Clear first 10 pages of cache for all participants
+            for page in range(1, 11):
+                for user_id in room.participants.values_list('id', flat=True):
+                    cache_key = f"room_{room.id}_messages_page_{page}_user_{user_id}"
+                    cache.delete(cache_key)
+            
+            # Also try delete_pattern if available (for Redis)
+            if hasattr(cache, 'delete_pattern'):
+                cache.delete_pattern(f"room_{room.id}_messages_*")
+        except Exception:
+            pass  # Cache clearing is not critical
+    
+    def _send_participant_added_notification(self, room, added_user, requesting_user):
+        """Send WebSocket notification about new participant"""
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        
+        try:
+            channel_layer = get_channel_layer()
+            room_group_name = f'chat_room_{room.id}'
+            
+            # Prepare notification data
+            notification_data = {
+                'type': 'participant_added',
+                'room_id': room.id,
+                'room_name': room.name,
+                'added_user': {
+                    'id': added_user.id,
+                    'username': added_user.username,
+                    'first_name': added_user.first_name,
+                    'last_name': added_user.last_name,
+                    'role': added_user.role
+                },
+                'added_by': {
+                    'id': requesting_user.id,
+                    'username': requesting_user.username,
+                    'role': requesting_user.role
+                }
+            }
+            
+            # Send to room group
+            async_to_sync(channel_layer.group_send)(
+                room_group_name,
+                {
+                    'type': 'participant_added_notification',
+                    'data': notification_data
+                }
+            )
+            
+            # Send notification to the newly added user
+            user_group = f'user_notifications_{added_user.id}'
+            async_to_sync(channel_layer.group_send)(
+                user_group,
+                {
+                    'type': 'participant_added_notification',
+                    'data': {
+                        **notification_data,
+                        'message': f'You were added to the chat "{room.name}" by {requesting_user.username}'
+                    }
+                }
+            )
+        except Exception:
+            pass  # WebSocket notifications are not critical
     
     def _update_read_status(self, room, user):
         """Update read status for user in room"""

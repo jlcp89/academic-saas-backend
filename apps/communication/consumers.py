@@ -102,6 +102,13 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
             'data': event['data']
         })
     
+    async def participant_added_notification(self, event):
+        """Send participant added notification to user"""
+        await self.send_json({
+            'type': 'participant_added',
+            'data': event['data']
+        })
+    
     async def user_status_update(self, event):
         """Send user online/offline status updates"""
         await self.send_json({
@@ -241,6 +248,13 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 'user_id': event['user_id'],
                 'username': event['username']
             })
+    
+    async def participant_added_notification(self, event):
+        """Forward participant added notification to WebSocket"""
+        await self.send_json({
+            'type': 'participant_added',
+            'data': event['data']
+        })
     
     @database_sync_to_async
     def user_can_access_room(self):
